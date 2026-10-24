@@ -28,8 +28,14 @@ const ACTIONS: Action[] = [
   makeAction({ id: "secure-cards" }),
   makeAction({ id: "check-transactions", dependencies: ["secure-cards"] }),
   makeAction({ id: "identify-reporting" }),
-  makeAction({ id: "replacement-requirements", dependencies: ["identify-reporting"] }),
-  makeAction({ id: "prepare-replacements", dependencies: ["replacement-requirements"] }),
+  makeAction({
+    id: "replacement-requirements",
+    dependencies: ["identify-reporting"],
+  }),
+  makeAction({
+    id: "prepare-replacements",
+    dependencies: ["replacement-requirements"],
+  }),
 ];
 
 // ─── topoSort ────────────────────────────────────────────────────────────────
@@ -39,8 +45,12 @@ describe("topoSort", () => {
     const order = topoSort(ACTIONS);
     const idx = (id: string) => order.indexOf(id);
     expect(idx("secure-cards")).toBeLessThan(idx("check-transactions"));
-    expect(idx("identify-reporting")).toBeLessThan(idx("replacement-requirements"));
-    expect(idx("replacement-requirements")).toBeLessThan(idx("prepare-replacements"));
+    expect(idx("identify-reporting")).toBeLessThan(
+      idx("replacement-requirements"),
+    );
+    expect(idx("replacement-requirements")).toBeLessThan(
+      idx("prepare-replacements"),
+    );
   });
 
   it("returns original order on a cyclic graph (graceful fallback)", () => {
@@ -70,16 +80,18 @@ describe("computeLayout", () => {
   it("places dependent nodes in a later column than their prerequisites", () => {
     const positions = computeLayout(ACTIONS);
     expect(positions.get("check-transactions")!.x).toBeGreaterThan(
-      positions.get("secure-cards")!.x
+      positions.get("secure-cards")!.x,
     );
     expect(positions.get("prepare-replacements")!.x).toBeGreaterThan(
-      positions.get("replacement-requirements")!.x
+      positions.get("replacement-requirements")!.x,
     );
   });
 
   it("places independent branches at the same column", () => {
     const positions = computeLayout(ACTIONS);
-    expect(positions.get("secure-cards")!.x).toBe(positions.get("identify-reporting")!.x);
+    expect(positions.get("secure-cards")!.x).toBe(
+      positions.get("identify-reporting")!.x,
+    );
   });
 });
 
@@ -129,7 +141,9 @@ describe("buildEdges", () => {
   });
 
   it("skips missing dependency IDs gracefully", () => {
-    const broken = [makeAction({ id: "orphan", dependencies: ["does-not-exist"] })];
+    const broken = [
+      makeAction({ id: "orphan", dependencies: ["does-not-exist"] }),
+    ];
     expect(() => buildEdges(broken)).not.toThrow();
     expect(buildEdges(broken)).toHaveLength(0);
   });
@@ -192,7 +206,8 @@ describe("graph refresh after action update", () => {
     let nodes = buildNodes(initialActions);
     let edges = buildEdges(initialActions);
 
-    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied).toBe(false);
+    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied)
+      .toBe(false);
     expect(edges[0]?.animated).toBe(false);
     expect(edges[0]?.style.stroke).toBe("#475569"); // slate-600
 
@@ -203,7 +218,8 @@ describe("graph refresh after action update", () => {
     nodes = buildNodes(inProgressActions);
     edges = buildEdges(inProgressActions);
 
-    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied).toBe(false);
+    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied)
+      .toBe(false);
     expect(edges[0]?.animated).toBe(true);
     expect(edges[0]?.style.stroke).toBe("#a78bfa"); // violet-400
 
@@ -214,7 +230,8 @@ describe("graph refresh after action update", () => {
     nodes = buildNodes(completedActions);
     edges = buildEdges(completedActions);
 
-    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied).toBe(true);
+    expect(nodes.find((n) => n.id === "step-2")?.data.prerequisitesSatisfied)
+      .toBe(true);
     expect(edges[0]?.animated).toBe(false);
     expect(edges[0]?.style.stroke).toBe("#34d399"); // emerald-400
   });
@@ -223,17 +240,23 @@ describe("graph refresh after action update", () => {
     const actions = [
       makeAction({ id: "p1", status: "completed" }),
       makeAction({ id: "p2", status: "in_progress" }),
-      makeAction({ id: "dependent", dependencies: ["p1", "p2"], status: "pending" }),
+      makeAction({
+        id: "dependent",
+        dependencies: ["p1", "p2"],
+        status: "pending",
+      }),
     ];
     let nodes = buildNodes(actions);
-    expect(nodes.find((n) => n.id === "dependent")?.data.prerequisitesSatisfied).toBe(false);
+    expect(nodes.find((n) => n.id === "dependent")?.data.prerequisitesSatisfied)
+      .toBe(false);
 
     // Complete p2
     const allCompleted = actions.map((a) =>
       a.id === "p2" ? { ...a, status: "completed" as const } : a
     );
     nodes = buildNodes(allCompleted);
-    expect(nodes.find((n) => n.id === "dependent")?.data.prerequisitesSatisfied).toBe(true);
+    expect(nodes.find((n) => n.id === "dependent")?.data.prerequisitesSatisfied)
+      .toBe(true);
   });
 });
 
@@ -252,7 +275,11 @@ describe("node selection integration", () => {
         approvalRequired: true,
         dependencies: [],
         successCriteria: ["Criterion 1", "Criterion 2"],
-        evidence: [{ kind: "user_provided", note: "Noted", recordedAt: "2026-01-01T00:00:00Z" }],
+        evidence: [{
+          kind: "user_provided",
+          note: "Noted",
+          recordedAt: "2026-01-01T00:00:00Z",
+        }],
       }),
     ];
 
@@ -277,4 +304,3 @@ describe("node selection integration", () => {
     expect(selectedAction?.evidence).toHaveLength(1);
   });
 });
-

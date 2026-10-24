@@ -36,7 +36,9 @@ export interface ActionNodeData extends Record<string, unknown> {
  * Returns a topological ordering of action IDs, or the original order if the
  * graph is invalid (cyclic / missing references).  Never throws.
  */
-export function topoSort(actions: Pick<Action, "id" | "dependencies">[]): string[] {
+export function topoSort(
+  actions: Pick<Action, "id" | "dependencies">[],
+): string[] {
   const ids = new Set(actions.map((a) => a.id));
   // filter out dangling references so we are robust against missing deps
   const adjIn = new Map<string, number>();
@@ -81,7 +83,7 @@ const GAP_Y = 60;
  * dependencies, then rows are distributed evenly within each column.
  */
 export function computeLayout(
-  actions: Pick<Action, "id" | "dependencies">[]
+  actions: Pick<Action, "id" | "dependencies">[],
 ): Map<string, { x: number; y: number }> {
   const ids = new Set(actions.map((a) => a.id));
   const column = new Map<string, number>();
@@ -91,7 +93,9 @@ export function computeLayout(
   for (const id of order) {
     const action = actions.find((a) => a.id === id)!;
     const deps = action.dependencies.filter((d) => ids.has(d));
-    const col = deps.length ? Math.max(...deps.map((d) => column.get(d) ?? 0)) + 1 : 0;
+    const col = deps.length
+      ? Math.max(...deps.map((d) => column.get(d) ?? 0)) + 1
+      : 0;
     column.set(id, col);
   }
 
@@ -117,13 +121,13 @@ export function computeLayout(
 // ─── Edge colour by status ────────────────────────────────────────────────────
 
 const EDGE_COLORS: Record<ActionStatus, string> = {
-  completed: "#34d399",   // emerald-400
+  completed: "#34d399", // emerald-400
   in_progress: "#a78bfa", // violet-400
   awaiting_approval: "#fb923c", // orange-400
-  ready: "#60a5fa",       // blue-400
-  pending: "#475569",     // slate-600
-  blocked: "#fbbf24",     // amber-400
-  failed: "#f87171",      // rose-400
+  ready: "#60a5fa", // blue-400
+  pending: "#475569", // slate-600
+  blocked: "#fbbf24", // amber-400
+  failed: "#f87171", // rose-400
 };
 
 function edgeColor(sourceStatus: ActionStatus): string {
@@ -142,7 +146,7 @@ export function buildNodes(actions: Action[]): GraphNode[] {
 
   return actions.map((action) => {
     const prereqsSatisfied = action.dependencies.every(
-      (dep) => actions.find((a) => a.id === dep)?.status === "completed"
+      (dep) => actions.find((a) => a.id === dep)?.status === "completed",
     );
     return {
       id: action.id,

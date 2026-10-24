@@ -13,14 +13,14 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
-  ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
-  useReactFlow,
-  ReactFlowProvider,
   type NodeMouseHandler,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -54,7 +54,7 @@ function GraphCanvas({ actions, selectedActionId, onNodeSelect }: Props) {
         ...n,
         selected: n.id === selectedActionId,
       })),
-    [nodes, selectedActionId]
+    [nodes, selectedActionId],
   );
 
   // Fit on first load
@@ -72,7 +72,7 @@ function GraphCanvas({ actions, selectedActionId, onNodeSelect }: Props) {
     if (fittedRef.current && nodes.length) {
       fitView({ padding: 0.15, duration: 300 });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions]);
 
   const handleNodeClick: NodeMouseHandler = useCallback(
@@ -80,7 +80,7 @@ function GraphCanvas({ actions, selectedActionId, onNodeSelect }: Props) {
       const action = actions.find((a) => a.id === node.id);
       onNodeSelect(action ?? null);
     },
-    [actions, onNodeSelect]
+    [actions, onNodeSelect],
   );
 
   const handlePaneClick = useCallback(() => {
@@ -129,13 +129,13 @@ function GraphCanvas({ actions, selectedActionId, onNodeSelect }: Props) {
           const data = n.data as unknown as ActionNodeData;
           const status = data?.action?.status;
           const colors: Record<string, string> = {
-            completed:         "#34d399",
-            in_progress:       "#a78bfa",
+            completed: "#34d399",
+            in_progress: "#a78bfa",
             awaiting_approval: "#fb923c",
-            ready:             "#60a5fa",
-            pending:           "#475569",
-            blocked:           "#fbbf24",
-            failed:            "#f87171",
+            ready: "#60a5fa",
+            pending: "#475569",
+            blocked: "#fbbf24",
+            failed: "#f87171",
           };
           return colors[status] ?? "#475569";
         }}

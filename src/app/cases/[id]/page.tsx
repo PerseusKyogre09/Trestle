@@ -27,12 +27,12 @@ const ActionGraph = dynamic(() => import("../../components/ActionGraph"), {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const tone: Record<string, string> = {
-  completed:         "text-emerald-300",
-  failed:            "text-rose-300",
-  blocked:           "text-amber-300",
-  ready:             "text-blue-300",
-  in_progress:       "text-violet-300",
-  pending:           "text-slate-400",
+  completed: "text-emerald-300",
+  failed: "text-rose-300",
+  blocked: "text-amber-300",
+  ready: "text-blue-300",
+  in_progress: "text-violet-300",
+  pending: "text-slate-400",
   awaiting_approval: "text-orange-300",
 };
 
@@ -62,14 +62,13 @@ export default function CasePage() {
   // ── Status transition (shared by list and graph views) ───────────────────
   const transition = useCallback(
     async (action: Action, status: "in_progress" | "completed" | "failed") => {
-      const evidence =
-        status === "completed"
-          ? {
-              kind: "user_provided" as const,
-              note: "User marked this task complete after reviewing the result.",
-              recordedAt: new Date().toISOString(),
-            }
-          : undefined;
+      const evidence = status === "completed"
+        ? {
+          kind: "user_provided" as const,
+          note: "User marked this task complete after reviewing the result.",
+          recordedAt: new Date().toISOString(),
+        }
+        : undefined;
 
       const r = await fetch(`/api/cases/${id}/actions/${action.id}`, {
         method: "PATCH",
@@ -90,18 +89,19 @@ export default function CasePage() {
       }
       setItem(await refreshed.json());
     },
-    [id]
+    [id],
   );
 
   const handleNodeSelect = useCallback(
     (action: Action | null) => setSelectedActionId(action?.id ?? null),
-    []
+    [],
   );
 
-  const selectedAction = item?.actions.find((a) => a.id === selectedActionId) ?? null;
+  const selectedAction = item?.actions.find((a) => a.id === selectedActionId) ??
+    null;
 
   // ── Error / loading ──────────────────────────────────────────────────────
-  if (error)
+  if (error) {
     return (
       <main className="mx-auto max-w-5xl px-6 py-10">
         <p className="text-rose-300">{error}</p>
@@ -110,13 +110,15 @@ export default function CasePage() {
         </Link>
       </main>
     );
+  }
 
-  if (!item)
+  if (!item) {
     return (
       <main className="mx-auto max-w-5xl px-6 py-10 text-slate-400">
         Loading case…
       </main>
     );
+  }
 
   const completed = item.actions.filter((a) => a.status === "completed").length;
   const counts = (status: string) =>
@@ -135,7 +137,9 @@ export default function CasePage() {
           <p className="text-sm uppercase tracking-[0.25em] text-blue-300">
             {item.status} case
           </p>
-          <h1 className="mt-3 text-4xl font-semibold text-slate-100">{item.title}</h1>
+          <h1 className="mt-3 text-4xl font-semibold text-slate-100">
+            {item.title}
+          </h1>
           <p className="mt-4 max-w-3xl text-slate-300">{item.originalInput}</p>
 
           {/* Stats */}
@@ -154,7 +158,9 @@ export default function CasePage() {
                 className="rounded-lg border border-slate-800 bg-slate-900/50 p-3"
               >
                 <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-100">{value}</p>
+                <p className="mt-1 text-xl font-semibold text-slate-100">
+                  {value}
+                </p>
               </div>
             ))}
           </div>
@@ -189,129 +195,135 @@ export default function CasePage() {
       </div>
 
       {/* ── Content area ────────────────────────────────────────────── */}
-      {view === "list" ? (
-        <div className="mx-auto w-full max-w-7xl px-6 pb-10 sm:px-10">
-          <section className="mt-8 space-y-4">
-            {item.actions.map((action) => {
-              const blockedBy = action.dependencies.filter(
-                (d) => item.actions.find((a) => a.id === d)?.status !== "completed"
-              );
-              const canStart =
-                blockedBy.length === 0 &&
-                ["pending", "ready", "failed"].includes(action.status);
+      {view === "list"
+        ? (
+          <div className="mx-auto w-full max-w-7xl px-6 pb-10 sm:px-10">
+            <section className="mt-8 space-y-4">
+              {item.actions.map((action) => {
+                const blockedBy = action.dependencies.filter(
+                  (d) =>
+                    item.actions.find((a) => a.id === d)?.status !==
+                      "completed",
+                );
+                const canStart = blockedBy.length === 0 &&
+                  ["pending", "ready", "failed"].includes(action.status);
 
-              return (
-                <article
-                  key={action.id}
-                  className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"
-                >
-                  <div className="flex flex-col justify-between gap-3 sm:flex-row">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h2 className="font-medium text-slate-100">{action.title}</h2>
-                        <span
-                          className={`text-xs font-medium uppercase tracking-wide ${tone[action.status]}`}
-                        >
-                          {action.status.replace("_", " ")}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">
-                        {action.description}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      {canStart && (
-                        <button
-                          onClick={() => transition(action, "in_progress")}
-                          className="rounded-md bg-blue-500 px-3 py-2 text-sm text-white"
-                        >
-                          Start
-                        </button>
-                      )}
-                      {action.status === "in_progress" && (
-                        <>
-                          <button
-                            onClick={() => transition(action, "completed")}
-                            className="rounded-md bg-emerald-600 px-3 py-2 text-sm text-white"
+                return (
+                  <article
+                    key={action.id}
+                    className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"
+                  >
+                    <div className="flex flex-col justify-between gap-3 sm:flex-row">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h2 className="font-medium text-slate-100">
+                            {action.title}
+                          </h2>
+                          <span
+                            className={`text-xs font-medium uppercase tracking-wide ${
+                              tone[action.status]
+                            }`}
                           >
-                            Complete
-                          </button>
-                          <button
-                            onClick={() => transition(action, "failed")}
-                            className="rounded-md border border-rose-400/40 px-3 py-2 text-sm text-rose-300"
-                          >
-                            Record failure
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4 text-sm sm:grid-cols-3">
-                    <div>
-                      <span className="text-slate-500">Prerequisites</span>
-                      <p className="mt-1 text-slate-300">
-                        {action.dependencies.length
-                          ? action.dependencies.join(", ")
-                          : "None"}
-                        {blockedBy.length > 0 && (
-                          <span className="block text-amber-300">
-                            Blocked by incomplete prerequisite
+                            {action.status.replace("_", " ")}
                           </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">
+                          {action.description}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        {canStart && (
+                          <button
+                            onClick={() => transition(action, "in_progress")}
+                            className="rounded-md bg-blue-500 px-3 py-2 text-sm text-white"
+                          >
+                            Start
+                          </button>
                         )}
-                      </p>
+                        {action.status === "in_progress" && (
+                          <>
+                            <button
+                              onClick={() => transition(action, "completed")}
+                              className="rounded-md bg-emerald-600 px-3 py-2 text-sm text-white"
+                            >
+                              Complete
+                            </button>
+                            <button
+                              onClick={() => transition(action, "failed")}
+                              className="rounded-md border border-rose-400/40 px-3 py-2 text-sm text-rose-300"
+                            >
+                              Record failure
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-slate-500">Risk / approval</span>
-                      <p className="mt-1 text-slate-300">
-                        {action.riskLevel} ·{" "}
-                        {action.approvalRequired
-                          ? "Human approval required"
-                          : "No approval flagged"}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Success criteria</span>
-                      <p className="mt-1 text-slate-300">
-                        {action.successCriteria.join(" ")}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-        </div>
-      ) : (
-        /* Graph view */
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-          {/* Canvas */}
-          <div
-            className="flex-1"
-            style={{ height: "calc(100vh - 380px)", minHeight: "400px" }}
-            role="region"
-            aria-label="Action dependency graph"
-          >
-            <ActionGraph
-              actions={item.actions}
-              selectedActionId={selectedActionId}
-              onNodeSelect={handleNodeSelect}
-            />
-          </div>
 
-          {/* Detail panel */}
-          {selectedAction && (
-            <div className="min-h-80 w-full shrink-0 overflow-y-auto lg:min-h-0 lg:w-80">
-              <ActionDetailPanel
-                action={selectedAction}
-                caseItem={item}
-                onClose={() => setSelectedActionId(null)}
-                onTransition={transition}
+                    <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4 text-sm sm:grid-cols-3">
+                      <div>
+                        <span className="text-slate-500">Prerequisites</span>
+                        <p className="mt-1 text-slate-300">
+                          {action.dependencies.length
+                            ? action.dependencies.join(", ")
+                            : "None"}
+                          {blockedBy.length > 0 && (
+                            <span className="block text-amber-300">
+                              Blocked by incomplete prerequisite
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Risk / approval</span>
+                        <p className="mt-1 text-slate-300">
+                          {action.riskLevel} · {action.approvalRequired
+                            ? "Human approval required"
+                            : "No approval flagged"}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Success criteria</span>
+                        <p className="mt-1 text-slate-300">
+                          {action.successCriteria.join(" ")}
+                        </p>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          </div>
+        )
+        : (
+          /* Graph view */
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+            {/* Canvas */}
+            <div
+              className="flex-1"
+              style={{ height: "calc(100vh - 380px)", minHeight: "400px" }}
+              role="region"
+              aria-label="Action dependency graph"
+            >
+              <ActionGraph
+                actions={item.actions}
+                selectedActionId={selectedActionId}
+                onNodeSelect={handleNodeSelect}
               />
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Detail panel */}
+            {selectedAction && (
+              <div className="min-h-80 w-full shrink-0 overflow-y-auto lg:min-h-0 lg:w-80">
+                <ActionDetailPanel
+                  action={selectedAction}
+                  caseItem={item}
+                  onClose={() => setSelectedActionId(null)}
+                  onTransition={transition}
+                />
+              </div>
+            )}
+          </div>
+        )}
     </main>
   );
 }

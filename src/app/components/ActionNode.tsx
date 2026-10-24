@@ -15,27 +15,58 @@ import type { ActionStatus, Priority, RiskLevel } from "../../domain/types";
 
 // ─── Colour maps ──────────────────────────────────────────────────────────────
 
-const statusStyles: Record<ActionStatus, { dot: string; badge: string; border: string }> = {
-  ready:             { dot: "bg-blue-400",    badge: "text-blue-300 bg-blue-400/10",    border: "border-blue-400/30" },
-  pending:           { dot: "bg-slate-500",   badge: "text-slate-400 bg-slate-700/50",  border: "border-slate-700" },
-  in_progress:       { dot: "bg-violet-400",  badge: "text-violet-300 bg-violet-400/10",border: "border-violet-400/30" },
-  awaiting_approval: { dot: "bg-orange-400",  badge: "text-orange-300 bg-orange-400/10",border: "border-orange-400/30" },
-  blocked:           { dot: "bg-amber-400",   badge: "text-amber-300 bg-amber-400/10",  border: "border-amber-400/30" },
-  completed:         { dot: "bg-emerald-400", badge: "text-emerald-300 bg-emerald-400/10", border: "border-emerald-400/30" },
-  failed:            { dot: "bg-rose-400",    badge: "text-rose-300 bg-rose-400/10",    border: "border-rose-400/30" },
+const statusStyles: Record<
+  ActionStatus,
+  { dot: string; badge: string; border: string }
+> = {
+  ready: {
+    dot: "bg-blue-400",
+    badge: "text-blue-300 bg-blue-400/10",
+    border: "border-blue-400/30",
+  },
+  pending: {
+    dot: "bg-slate-500",
+    badge: "text-slate-400 bg-slate-700/50",
+    border: "border-slate-700",
+  },
+  in_progress: {
+    dot: "bg-violet-400",
+    badge: "text-violet-300 bg-violet-400/10",
+    border: "border-violet-400/30",
+  },
+  awaiting_approval: {
+    dot: "bg-orange-400",
+    badge: "text-orange-300 bg-orange-400/10",
+    border: "border-orange-400/30",
+  },
+  blocked: {
+    dot: "bg-amber-400",
+    badge: "text-amber-300 bg-amber-400/10",
+    border: "border-amber-400/30",
+  },
+  completed: {
+    dot: "bg-emerald-400",
+    badge: "text-emerald-300 bg-emerald-400/10",
+    border: "border-emerald-400/30",
+  },
+  failed: {
+    dot: "bg-rose-400",
+    badge: "text-rose-300 bg-rose-400/10",
+    border: "border-rose-400/30",
+  },
 };
 
 const priorityColors: Record<Priority, string> = {
-  low:    "text-slate-400",
+  low: "text-slate-400",
   medium: "text-blue-300",
-  high:   "text-amber-300",
+  high: "text-amber-300",
   urgent: "text-rose-300",
 };
 
 const riskColors: Record<RiskLevel, string> = {
-  low:      "text-slate-400",
-  medium:   "text-amber-300",
-  high:     "text-orange-300",
+  low: "text-slate-400",
+  medium: "text-amber-300",
+  high: "text-orange-300",
   critical: "text-rose-300",
 };
 
@@ -56,7 +87,9 @@ function ActionNode({ data, selected }: NodeProps & { data: ActionNodeData }) {
       className={[
         "relative w-60 rounded-xl border bg-slate-900 p-4 shadow-lg transition-all",
         styles.border,
-        selected ? "ring-2 ring-blue-400/60 ring-offset-1 ring-offset-slate-950" : "",
+        selected
+          ? "ring-2 ring-blue-400/60 ring-offset-1 ring-offset-slate-950"
+          : "",
       ].join(" ")}
     >
       {/* ── Handles ─────────────────────────────────────────────────── */}
@@ -77,7 +110,9 @@ function ActionNode({ data, selected }: NodeProps & { data: ActionNodeData }) {
           className={`mt-1 h-2 w-2 shrink-0 rounded-full ${styles.dot}`}
           aria-hidden="true"
         />
-        <p className="text-sm font-medium leading-snug text-slate-100">{action.title}</p>
+        <p className="text-sm font-medium leading-snug text-slate-100">
+          {action.title}
+        </p>
       </div>
 
       {/* ── Status badge ────────────────────────────────────────────── */}
@@ -102,17 +137,23 @@ function ActionNode({ data, selected }: NodeProps & { data: ActionNodeData }) {
 
       {/* ── Prerequisites indicator ──────────────────────────────────── */}
       <div className="mt-3 border-t border-slate-800 pt-2">
-        {action.dependencies.length > 0 ? (
-          <span
-            className={`text-[10px] ${prerequisitesSatisfied ? "text-emerald-400" : "text-amber-400"}`}
-          >
-            {prerequisitesSatisfied ? "✓ Prerequisites met" : "⏳ Awaiting prerequisites"}
-          </span>
-        ) : (
-          <span className="text-[10px] text-slate-500">
-            ✓ Independent (no prerequisites)
-          </span>
-        )}
+        {action.dependencies.length > 0
+          ? (
+            <span
+              className={`text-[10px] ${
+                prerequisitesSatisfied ? "text-emerald-400" : "text-amber-400"
+              }`}
+            >
+              {prerequisitesSatisfied
+                ? "✓ Prerequisites met"
+                : "⏳ Awaiting prerequisites"}
+            </span>
+          )
+          : (
+            <span className="text-[10px] text-slate-500">
+              ✓ Independent (no prerequisites)
+            </span>
+          )}
       </div>
     </div>
   );
