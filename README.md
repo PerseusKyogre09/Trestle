@@ -10,10 +10,11 @@ This repository contains:
 - **Interactive Action Graph**: Visual SVG-based directed acyclic graph layout with custom bezier connectors, interactive zoom/pan controls, status indicators, and drawer review (`src/domain/graph.ts`, `src/app/components/ActionGraph.tsx`).
 - **Human approval & permission policy framework**: Central server-side risk classification, cryptographic payload hashing (SHA-256), approval lifecycles (pending, approved, rejected, expired, invalidated), and strict authorization enforcement (`src/server/policy.ts`, `src/server/approvalService.ts`).
 - **Execution-provider abstraction & controller**: Provider interface, concurrency guards, failure/uncertainty reconciliation, outcome verification against success criteria, and a mock execution provider with explicit simulated labelling (`src/server/execution/`).
-- **SQLite persistence with Prisma**: Persistent storage of cases, actions, approvals, and execution attempt audit trails (`src/server/repository.ts`, `prisma/schema.prisma`).
+- **Autonomous workflow runs**: Persistent run status, provider event trace, pause/resume, duplicate-run protection, and recovery to an uncertain state after a server restart (`src/server/workflowOrchestrator.ts`). The scheduler follows the persisted action sequence and dependency graph from the earliest unfinished eligible task. It runs only actions with a real, policy-approved provider; it pauses for user action or approval rather than skipping ahead or substituting mock execution.
+- **SQLite persistence with Prisma**: Persistent storage of cases, actions, approvals, execution attempts, and workflow runs (`src/server/repository.ts`, `prisma/schema.prisma`).
 - **Case management & approval UI**: Interactive case dashboard, approval review panel, operation preparation modal, graph/list views, and execution audit history (`src/app/cases/[id]/page.tsx`).
 
-*Planned integrations*: LLM-assisted workflow compilation, multi-user authentication/RBAC, and broader TinyFish browser automation. The current TinyFish adapter is intentionally limited to opt-in, read-only lost-document research.
+*Limitations*: No multi-user authentication/RBAC; TinyFish is limited to read-only lost-document research. The live browser preview is watch-only. Direct browser control and consequential service actions are not implemented.
 
 ---
 
@@ -148,16 +149,30 @@ The central `ExecutionController` (`src/server/execution/controller.ts`):
 
 ---
 
-### 6. TinyFish lost-document research (optional)
+### 6. TinyFish research and workflow runs
 
-The repository includes an opt-in TinyFish provider for the `identify-reporting` action. India is the default demo jurisdiction, and the provider researches Indian government or issuing-authority guidance for documents such as an Indian driving licence. The jurisdiction and document type remain editable. It never submits applications, uploads documents, changes accounts, pays fees, or marks the action completed. Configure it locally with:
+The case page has **Start workflow** and **Guided** modes. Autonomous mode starts at the first unfinished task in persisted workflow order whose prerequisites are complete. TinyFish research runs automatically when it is the next eligible action. Tasks without an implemented real provider become a user-action gate; they are not skipped, and the mock provider is never substituted. A matching approval resumes orchestration and triggers execution without a separate Execute click. Each event is persisted as it arrives and the page polls persisted run state so progress, the provider run ID, preview URL, research result, and source links survive refreshes. TRESTLE advances only when the existing controller verifies the action's completion criteria, including procedure details and at least one recognized official-domain source. Other HTTPS URLs remain visible but do not count as official verification.
+
+TinyFish's `STREAMING_URL` can be embedded as a real, read-only preview, with an **Open live browser** link shown as a fallback. The Agent preview does not let the user interact with the browser. Guided help uses workflow definitions and persisted provider progress only; TRESTLE cannot inspect the preview's live DOM or see user-entered values. Direct browser control uses a separate TinyFish Browser API/CDP capability and is not implemented. The workflow stops for the user's own action when no supported provider capability exists. It never submits applications, uploads documents, changes accounts, pays fees, or claims those outcomes.
+
+### Shared browser proof of concept
+
+The Workflow Copilot also includes an opt-in **Shared browser · proof of concept** panel. It creates a TinyFish Browser API session at the public `the-internet.herokuapp.com` test site, connects from the TRESTLE server using CDP, and streams actual `Page.screencastFrame` events from that same session over a local SSE endpoint. It also has a binary JPEG initial-frame fallback plus constrained click, keyboard, scroll, and same-site navigation commands. **Take control** changes the server-side controller to the user; navigate to the site's **Inputs** page, enter a harmless number, then **Return to agent** to let the fixed CDP demo step inspect and increment the number in that same tab. A database claim serializes commands, and reconnect reuses the persisted session rather than creating a duplicate. **End remote session** calls TinyFish's documented session termination endpoint. Frame size/delivery age and input round-trip timing are shown in the panel and server logs for local diagnosis.
+
+This is a controlled interaction demo, not an extension of the goal-based Agent SSE run: TinyFish documents the Agent `STREAMING_URL` as read-only and documents Browser API as a CDP session; it does not document a built-in interactive viewer or an Agent API that attaches to an existing Browser API session. The proof-of-concept agent continuation is therefore a fixed, harmless Playwright step, not a general-purpose autonomous website agent. Navigation is restricted to the test site. Do not enter personal or sensitive data. CDP details are encrypted at rest using a key derived from the server-only `TINYFISH_API_KEY` and are never returned to the browser client.
+
+The panel is disabled in production and the application has no authentication, so this remains local-development-only. TinyFish states that Browser API sessions consume wallet balance and are terminated by inactivity according to the requested timeout or account plan; the demo requests a 15-minute inactivity timeout and provides an explicit end button. Check your TinyFish wallet and plan before starting a session.
+
+Configure a local key with:
 
 ```bash
 cp .env.example .env.local
 # Set TINYFISH_API_KEY in .env.local only; never commit this file.
 ```
 
-The mock provider remains the default. A live run requires a separate approval for the exact jurisdiction, document type, and research operation. The local app currently has no authentication or multi-user authorization, so keep live use to a local demo.
+Live research uses the server-side `TINYFISH_API_KEY`; mock execution remains a separate, explicitly `SIMULATED` option. Read-only research is policy-eligible to run automatically after a user starts an autonomous workflow. High-consequence tasks remain user-controlled. The local app currently has no authentication or multi-user authorization, so keep live use to a local demo.
+
+Apply additive database migrations with `npx prisma migrate deploy`. Do not use `npm run db:reset` to install the workflow-run schema; it deletes local data. To stop scheduling, use **Pause after current task**. A running provider operation is not reported as cancelled. After a server restart, an interrupted run is marked uncertain and is not retried automatically.
 
 ### AI privacy boundary
 

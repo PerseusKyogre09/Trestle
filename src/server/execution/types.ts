@@ -10,7 +10,18 @@ export interface ExecutionContext {
   approvalId?: string;
   operation: ProposedOperation;
   dryRun?: boolean;
+  onProgress?: (event: ProviderProgressEvent) => Promise<void>;
 }
+
+export type ProviderProgressEvent = {
+  type: string;
+  runId?: string;
+  purpose?: string;
+  streamingUrl?: string;
+  url?: string;
+  status?: string;
+  timestamp?: string;
+};
 
 export interface EligibilityResult {
   eligible: boolean;

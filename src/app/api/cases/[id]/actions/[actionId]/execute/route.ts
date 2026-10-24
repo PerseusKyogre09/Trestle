@@ -4,6 +4,7 @@ import {
   executionController,
   ExecutionControllerError,
 } from "../../../../../../../server/execution/controller";
+import { resumeAfterUserAction } from "../../../../../../../server/workflowOrchestrator";
 
 export async function POST(
   request: Request,
@@ -29,6 +30,7 @@ export async function POST(
       // inside the controller. Client-supplied operation fields are ignored.
       providerName: parsed.data.provider,
     });
+    if (result.outcome === "verified") await resumeAfterUserAction(id);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ExecutionControllerError) {

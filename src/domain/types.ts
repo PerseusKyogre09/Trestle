@@ -44,6 +44,43 @@ export type EvidenceKind = (typeof evidenceKinds)[number];
 export type ApprovalStatus = (typeof approvalStatuses)[number];
 export type RiskCategory = (typeof riskCategories)[number];
 export type ExecutionStatus = (typeof executionStatuses)[number];
+export type WorkflowRunStatus =
+  | "running"
+  | "waiting_for_user"
+  | "waiting_for_approval"
+  | "blocked"
+  | "failed"
+  | "uncertain"
+  | "completed"
+  | "paused";
+export type WorkflowMode = "autonomous" | "guided";
+
+export type WorkflowRunEvent = {
+  id: string;
+  type: string;
+  timestamp: string;
+  actionId?: string;
+  runId?: string;
+  purpose?: string;
+  streamingUrl?: string;
+  url?: string;
+  status?: string;
+  message?: string;
+};
+
+export type WorkflowRun = {
+  id: string;
+  caseId: string;
+  status: WorkflowRunStatus;
+  mode: WorkflowMode;
+  currentActionId: string | null;
+  pauseRequested: boolean;
+  errorMessage: string | null;
+  events: WorkflowRunEvent[];
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+};
 
 export type Evidence = { kind: EvidenceKind; note: string; recordedAt: string };
 
@@ -93,6 +130,7 @@ export type ExecutionAttempt = {
 export type Action = {
   id: string;
   caseId: string;
+  sequence?: number;
   title: string;
   description: string;
   status: ActionStatus;

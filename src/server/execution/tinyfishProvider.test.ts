@@ -11,6 +11,7 @@ const context: ExecutionContext = {
     payload: {
       jurisdiction: "United Kingdom",
       documentType: "driving licence",
+      researchTask: "identify-reporting",
     },
   },
 };
@@ -38,7 +39,7 @@ describe("TinyFishExecutionProvider", () => {
       responseFor([
         'data: {"type":"STARTED","run_id":"run-1"}\n\n',
         'data: {"type":"PROGRESS","purpose":"Searching"}\n\n',
-        'data: {"type":"COMPLETE","status":"COMPLETED","result":{"summary":"Found guidance","sourceUrls":["https://gov.example"],"requirements":["Use the issuing authority process"],"nextSteps":["Review the official guidance"]}}\n\n',
+        'data: {"type":"COMPLETE","status":"COMPLETED","result":{"summary":"Found guidance","sourceUrls":["https://parivahan.gov.in/"],"requirements":["Use the issuing authority process"],"nextSteps":["Review the official guidance"]}}\n\n',
       ])
     );
 
@@ -48,7 +49,8 @@ describe("TinyFishExecutionProvider", () => {
     expect(result.isSimulated).toBe(false);
     expect(result.canVerifyOutcome).toBe(true);
     expect(result.evidence?.kind).toBe("verified");
-    expect(result.details?.sourceUrls).toEqual(["https://gov.example"]);
+    expect(result.details?.sourceUrls).toEqual(["https://parivahan.gov.in/"]);
+    expect(result.details?.officialSourceUrls).toEqual(["https://parivahan.gov.in/"]);
     expect((result.details?.trace as Array<Record<string, unknown>>).map((event) => event.type)).toEqual([
       "STARTED",
       "PROGRESS",
@@ -122,6 +124,22 @@ describe("TinyFishExecutionProvider", () => {
     expect(result.evidence).toBeUndefined();
   });
 
+  it("does not treat a non-government HTTPS page as official evidence", async () => {
+    process.env.TINYFISH_API_KEY = "test-key";
+    const provider = new TinyFishExecutionProvider(async () =>
+      responseFor([
+        'data: {"type":"COMPLETE","status":"COMPLETED","result":{"summary":"Found guidance","sourceUrls":["https://example.com"],"requirements":["A requirement"],"nextSteps":["A next step"]}}\n\n',
+      ])
+    );
+
+    const result = await provider.execute(context);
+
+    expect(result.status).toBe("succeeded");
+    expect(result.canVerifyOutcome).toBe(false);
+    expect(result.evidence).toBeUndefined();
+    expect(result.details?.officialSourceUrls).toEqual([]);
+  });
+
   it("handles incomplete chunks and failed terminal events", async () => {
     process.env.TINYFISH_API_KEY = "test-key";
     const provider = new TinyFishExecutionProvider(async () =>
@@ -184,6 +202,7 @@ describe("TinyFishExecutionProvider", () => {
         payload: {
           jurisdiction: "India",
           documentType: "Aadhaar number 123456789012",
+          researchTask: "identify-reporting",
         },
       },
     })).rejects.toThrow(/generic, non-personal/);

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { assertTransition } from "../../../../../../domain/engine";
 import { transitionSchema } from "../../../../../../domain/validation";
 import { getCase, updateAction } from "../../../../../../server/repository";
+import { resumeAfterUserAction } from "../../../../../../server/workflowOrchestrator";
+import { invalidateApproval } from "../../../../../../server/approvalService";
 
 export async function PATCH(
   request: Request,
@@ -29,9 +31,15 @@ export async function PATCH(
 
   // Enforce server-side security rule:
   // "Do not allow the client to set an action to approved or completed by directly editing arbitrary fields."
+  const manualUserReport = action.executionMode !== "automated" &&
+    body.data.status === "completed" &&
+    body.data.evidence?.kind === "user_provided" &&
+    body.data.evidence.note.startsWith("User reports:") &&
+    body.data.evidence.note.trim().length >= 3;
   if (
     body.data.status === "completed" &&
-    (action.approvalRequired || ["high", "critical"].includes(action.riskLevel))
+    (action.approvalRequired || ["high", "critical"].includes(action.riskLevel)) &&
+    !manualUserReport
   ) {
     return NextResponse.json(
       {
@@ -59,6 +67,16 @@ export async function PATCH(
       body.data.status,
       body.data.evidence,
     );
+    if (body.data.status === "completed") {
+      if (manualUserReport) {
+        for (const approval of action.approvals ?? []) {
+          if (["pending", "approved"].includes(approval.status)) {
+            await invalidateApproval(id, approval.id, "The user reported completing this action personally.");
+          }
+        }
+      }
+      await resumeAfterUserAction(id);
+    }
     return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json(

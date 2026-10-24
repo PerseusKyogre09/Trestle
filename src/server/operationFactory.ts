@@ -13,7 +13,11 @@ export function buildOperationForAction(
   action: Action,
   context: Record<string, unknown> = {},
 ): ProposedOperation {
-  if (action.id === "identify-reporting") {
+  const researchTasks = new Set([
+    "identify-reporting",
+    "replacement-requirements",
+  ]);
+  if (researchTasks.has(action.id)) {
     const jurisdiction = typeof context.jurisdiction === "string" ? context.jurisdiction : "";
     const documentType = typeof context.documentType === "string" ? context.documentType : "";
     const research = createResearchBrief(jurisdiction, documentType);
@@ -24,8 +28,10 @@ export function buildOperationForAction(
     }
     return {
       operationType: "lost_document_research",
-      description: `Research official ${research.documentType} replacement guidance for ${research.jurisdiction}.`,
-      payload: research,
+      description: action.id === "identify-reporting"
+        ? `Find official reporting guidance for a lost ${research.documentType} in ${research.jurisdiction}.`
+        : `Find official replacement requirements for a ${research.documentType} in ${research.jurisdiction}.`,
+      payload: { ...research, researchTask: action.id },
     };
   }
 

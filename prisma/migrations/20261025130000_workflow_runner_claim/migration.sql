@@ -1,0 +1,2 @@
+ALTER TABLE "WorkflowRun"
+ADD COLUMN "runnerClaimed" BOOLEAN NOT NULL DEFAULT false;

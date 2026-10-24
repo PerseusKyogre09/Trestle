@@ -8,21 +8,24 @@ datasource db {
 }
 
 model Case {
-  id                String             @id
-  title             String
-  description       String
-  originalInput     String
-  status            String             @default("active")
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  actions           Action[]
-  approvals         Approval[]
-  executionAttempts ExecutionAttempt[]
+  id                    String                 @id
+  title                 String
+  description           String
+  originalInput         String
+  status                String                 @default("active")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  actions               Action[]
+  approvals             Approval[]
+  executionAttempts     ExecutionAttempt[]
+  workflowRuns          WorkflowRun[]
+  sharedBrowserSessions SharedBrowserSession[]
 }
 
 model Action {
   id                String             @id
   caseId            String
+  sequence          Int                @default(0)
   title             String
   description       String
   status            String             @default("pending")
@@ -89,4 +92,43 @@ model ExecutionAttempt {
 
   @@index([caseId])
   @@index([actionId])
+}
+
+model WorkflowRun {
+  id              String    @id
+  caseId          String
+  status          String    @default("running")
+  mode            String    @default("autonomous")
+  currentActionId String?
+  pauseRequested  Boolean   @default(false)
+  runnerClaimed   Boolean   @default(false)
+  errorMessage    String?
+  context         String    @default("{}")
+  events          String    @default("[]")
+  activeLock      String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  finishedAt      DateTime?
+  case            Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+}
+
+model SharedBrowserSession {
+  id                  String   @id
+  caseId              String
+  providerSessionId   String   @unique
+  encryptedConnection String
+  status              String   @default("connecting")
+  controlOwner        String   @default("agent")
+  commandClaimed      Boolean  @default(false)
+  currentUrl          String?
+  pageTitle           String?
+  lastActivity        String?
+  activeLock          String?  @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  case                Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, updatedAt])
 }

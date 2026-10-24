@@ -9,6 +9,10 @@ import type {
   ExecutionStatus,
   RiskCategory,
   Workflow,
+  WorkflowMode,
+  WorkflowRun,
+  WorkflowRunEvent,
+  WorkflowRunStatus,
 } from "../domain/types";
 import { readiness } from "../domain/engine";
 
@@ -63,6 +67,7 @@ export const mapAction = (
 ): Action => ({
   id: a.id,
   caseId: a.caseId,
+  sequence: a.sequence,
   title: a.title,
   description: a.description,
   status: a.status as Action["status"],
@@ -94,8 +99,9 @@ export async function createCase(
       description: workflow.description,
       originalInput: input,
       actions: {
-        create: workflow.actions.map((a) => ({
+        create: workflow.actions.map((a, sequence) => ({
           id: a.id,
+          sequence,
           title: a.title,
           description: a.description,
           status: a.status,
@@ -317,7 +323,7 @@ export async function claimActionForExecution(
     where: {
       id: actionId,
       caseId,
-      status: { in: ["pending", "ready", "awaiting_approval", "in_progress"] },
+      status: { in: ["pending", "ready", "blocked", "awaiting_approval"] },
     },
     data: { status: "in_progress" },
   });
@@ -390,6 +396,156 @@ export async function getExecutionAttemptsByActionId(
     orderBy: { startedAt: "desc" },
   });
   return attempts.map(mapExecutionAttempt);
+}
+
+function mapWorkflowRun(run: {
+  id: string;
+  caseId: string;
+  status: string;
+  mode: string;
+  currentActionId: string | null;
+  pauseRequested: boolean;
+  errorMessage: string | null;
+  events: string;
+  createdAt: Date;
+  updatedAt: Date;
+  finishedAt: Date | null;
+}): WorkflowRun {
+  return {
+    id: run.id,
+    caseId: run.caseId,
+    status: run.status as WorkflowRunStatus,
+    mode: run.mode as WorkflowMode,
+    currentActionId: run.currentActionId,
+    pauseRequested: run.pauseRequested,
+    errorMessage: run.errorMessage,
+    events: parse<WorkflowRunEvent[]>(run.events),
+    createdAt: run.createdAt.toISOString(),
+    updatedAt: run.updatedAt.toISOString(),
+    finishedAt: run.finishedAt?.toISOString() ?? null,
+  };
+}
+
+const terminalWorkflowStatuses = new Set<WorkflowRunStatus>([
+  "failed",
+  "uncertain",
+  "completed",
+]);
+
+export async function createWorkflowRun(input: {
+  caseId: string;
+  mode: WorkflowMode;
+  context: { jurisdiction: string; documentType: string };
+}): Promise<{ run: WorkflowRun; created: boolean }> {
+  const existing = await prisma.workflowRun.findFirst({
+    where: { activeLock: input.caseId },
+  });
+  if (existing) return { run: mapWorkflowRun(existing), created: false };
+
+  try {
+    const created = await prisma.workflowRun.create({
+      data: {
+        id: crypto.randomUUID(),
+        caseId: input.caseId,
+        mode: input.mode,
+        status: input.mode === "autonomous" ? "running" : "waiting_for_user",
+        activeLock: input.caseId,
+        context: JSON.stringify(input.context),
+        events: JSON.stringify([{
+          id: crypto.randomUUID(),
+          type: "WORKFLOW_STARTED",
+          timestamp: new Date().toISOString(),
+          message: input.mode === "autonomous"
+            ? "Autonomous workflow started. TRESTLE will run eligible read-only research and pause at user or approval gates."
+            : "Guided workflow started. TRESTLE will provide instructions without controlling your browser.",
+        } satisfies WorkflowRunEvent]),
+      },
+    });
+    return { run: mapWorkflowRun(created), created: true };
+  } catch (error) {
+    const raced = await prisma.workflowRun.findFirst({
+      where: { activeLock: input.caseId },
+    });
+    if (raced) return { run: mapWorkflowRun(raced), created: false };
+    throw error;
+  }
+}
+
+export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const run = await prisma.workflowRun.findUnique({ where: { id } });
+  return run ? mapWorkflowRun(run) : null;
+}
+
+export async function getWorkflowRunRecord(id: string) {
+  return prisma.workflowRun.findUnique({ where: { id } });
+}
+
+export async function claimWorkflowRunner(id: string): Promise<boolean> {
+  const result = await prisma.workflowRun.updateMany({
+    where: { id, status: "running", runnerClaimed: false },
+    data: { runnerClaimed: true },
+  });
+  return result.count === 1;
+}
+
+export async function releaseWorkflowRunner(id: string): Promise<void> {
+  await prisma.workflowRun.updateMany({
+    where: { id },
+    data: { runnerClaimed: false },
+  });
+}
+
+export async function listWorkflowRuns(caseId: string): Promise<WorkflowRun[]> {
+  const runs = await prisma.workflowRun.findMany({
+    where: { caseId },
+    orderBy: { createdAt: "desc" },
+  });
+  return runs.map(mapWorkflowRun);
+}
+
+export async function listActiveWorkflowRuns(caseId: string) {
+  return prisma.workflowRun.findMany({
+    where: { caseId, activeLock: caseId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function updateWorkflowRun(
+  id: string,
+  data: Partial<{
+    status: WorkflowRunStatus;
+    mode: WorkflowMode;
+    currentActionId: string | null;
+    pauseRequested: boolean;
+    errorMessage: string | null;
+    finishedAt: Date | null;
+  }>,
+): Promise<WorkflowRun | null> {
+  const status = data.status;
+  const updated = await prisma.workflowRun.update({
+    where: { id },
+    data: {
+      ...data,
+      activeLock: status && terminalWorkflowStatuses.has(status) ? null : undefined,
+      runnerClaimed: status && terminalWorkflowStatuses.has(status) ? false : undefined,
+    },
+  });
+  return mapWorkflowRun(updated);
+}
+
+export async function appendWorkflowRunEvent(
+  id: string,
+  event: WorkflowRunEvent,
+): Promise<WorkflowRun | null> {
+  const run = await prisma.workflowRun.findUnique({ where: { id } });
+  if (!run) return null;
+  const events = parse<WorkflowRunEvent[]>(run.events);
+  events.push(event);
+  await prisma.workflowRun.update({
+    where: { id },
+    data: { events: JSON.stringify(events.slice(-300)) },
+  });
+  return getWorkflowRun(id);
 }
 
 export async function resetCaseForDemo(caseId: string): Promise<boolean> {

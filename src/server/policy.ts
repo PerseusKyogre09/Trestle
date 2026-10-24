@@ -16,6 +16,7 @@ const LOW_RISK_OPERATIONS = new Set([
   "prepare_draft",
   "draft",
   "lookup_guidance",
+  "lost_document_research",
 ]);
 
 const REQUIRES_REVIEW_OPERATIONS = new Set([

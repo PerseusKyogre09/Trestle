@@ -5,6 +5,10 @@ import {
   approveRequest,
   rejectRequest,
 } from "../../../../../../../server/approvalService";
+import {
+  resumeApprovalGates,
+  stopRejectedApprovalGates,
+} from "../../../../../../../server/workflowOrchestrator";
 
 export async function POST(
   request: Request,
@@ -27,12 +31,14 @@ export async function POST(
         decidedBy: parsed.data.decidedBy ?? "user",
         notes: parsed.data.notes,
       });
+      await resumeApprovalGates(id);
       return NextResponse.json(updated);
     } else {
       const updated = await rejectRequest(id, approvalId, {
         decidedBy: parsed.data.decidedBy ?? "user",
         reason: parsed.data.reason ?? parsed.data.notes,
       });
+      await stopRejectedApprovalGates(id, updated.actionId);
       return NextResponse.json(updated);
     }
   } catch (error) {

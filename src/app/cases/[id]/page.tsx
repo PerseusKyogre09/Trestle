@@ -15,6 +15,7 @@ import type {
   ExecutionAttempt,
 } from "../../../domain/types";
 import ActionDetailPanel from "../../components/ActionDetailPanel";
+import WorkflowRunPanel from "../../components/WorkflowRunPanel";
 
 const ActionGraph = dynamic(() => import("../../components/ActionGraph"), {
   ssr: false,
@@ -148,14 +149,25 @@ export default function CasePage() {
 
   // Status transition (shared by list and graph views)
   const transition = useCallback(
-    async (action: Action, status: "in_progress" | "completed" | "failed") => {
-      const evidence = status === "completed"
-        ? {
-          kind: "user_provided" as const,
-          note: "User marked this task complete after reviewing the result.",
+    async (
+      action: Action,
+      status: "in_progress" | "completed" | "failed",
+      userReport?: string,
+    ) => {
+      let evidence: { kind: "user_provided"; note: string; recordedAt: string } | undefined;
+      if (status === "completed") {
+        const needsUserReport = action.executionMode !== "automated" &&
+          (action.approvalRequired || ["high", "critical"].includes(action.riskLevel));
+        const report = needsUserReport
+          ? userReport?.trim() || window.prompt("Describe what you completed yourself. TRESTLE records this as your report; it does not independently verify the external result.")
+          : userReport?.trim() || "User reports completing this task after reviewing the result.";
+        if (report === null || !report.trim()) return;
+        evidence = {
+          kind: "user_provided",
+          note: needsUserReport ? `User reports: ${report.trim()}` : report.trim(),
           recordedAt: new Date().toISOString(),
-        }
-        : undefined;
+        };
+      }
 
       const r = await fetch(`/api/cases/${id}/actions/${action.id}`, {
         method: "PATCH",
@@ -633,6 +645,16 @@ export default function CasePage() {
           </div>
         </header>
 
+        <WorkflowRunPanel
+          caseId={id}
+          actions={item.actions}
+          approvals={approvals}
+          jurisdiction={researchJurisdiction}
+          documentType={researchDocumentType}
+          onCaseRefresh={refreshData}
+          onTransition={transition}
+        />
+
         {/* Approval Queue Panel */}
         <section className="mt-8 rounded-xl border border-orange-900/40 bg-orange-950/20 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-900/30 pb-3">
@@ -801,7 +823,7 @@ export default function CasePage() {
                       {/* Action Controls */}
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
                         {/* Prepare & Request Approval Button */}
-                        {!isLiveResearch && action.status !== "completed" && !activeApproved && (
+                        {!isLiveResearch && action.executionMode !== "manual" && action.status !== "completed" && !activeApproved && (
                           <button
                             onClick={() => requestActionApproval(action)}
                             disabled={submittingReq}
@@ -821,6 +843,15 @@ export default function CasePage() {
                             {executingActionId === action.id
                               ? "Executing…"
                               : "Complete via SIMULATED Mock Provider"}
+                          </button>
+                        )}
+
+                        {action.status === "in_progress" && action.executionMode !== "automated" && (
+                          <button
+                            onClick={() => void transition(action, "completed")}
+                            className="rounded-md border border-emerald-700 px-3 py-2 text-sm text-emerald-200 hover:bg-emerald-950/40"
+                          >
+                            I completed this myself
                           </button>
                         )}
 

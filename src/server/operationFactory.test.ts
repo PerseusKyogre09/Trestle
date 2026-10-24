@@ -27,8 +27,8 @@ describe("server operation factory", () => {
       documentType: "Indian driving licence",
     })).toEqual({
       operationType: "lost_document_research",
-      description: "Research official Indian driving licence replacement guidance for India.",
-      payload: { jurisdiction: "India", documentType: "Indian driving licence" },
+      description: "Find official reporting guidance for a lost Indian driving licence in India.",
+      payload: { jurisdiction: "India", documentType: "Indian driving licence", researchTask: "identify-reporting" },
     });
   });
 

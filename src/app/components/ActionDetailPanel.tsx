@@ -475,10 +475,19 @@ export default function ActionDetailPanel(
             <>
               {action.approvalRequired
                 ? (
-                  <p className="rounded-md border border-orange-400/20 bg-orange-400/5 p-2 text-xs leading-5 text-orange-200">
-                    This action requires approval. Use the approved execution
-                    control to complete it with recorded evidence.
-                  </p>
+                  <div className="space-y-2">
+                    <p className="rounded-md border border-orange-400/20 bg-orange-400/5 p-2 text-xs leading-5 text-orange-200">
+                      Approval is for an automated operation. If you perform this task yourself, record your report here. TRESTLE will label it user-provided and will not claim independent verification.
+                    </p>
+                    {action.executionMode !== "automated" && (
+                      <button
+                        onClick={() => onTransition(action, "completed")}
+                        className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                      >
+                        I completed this myself
+                      </button>
+                    )}
+                  </div>
                 )
                 : (
                   <button
@@ -540,7 +549,7 @@ export default function ActionDetailPanel(
           </div>
         )}
         <div className="mt-2 flex flex-wrap gap-2">
-          {!blockedBy.length && !approvals.some((item) =>
+          {action.executionMode !== "manual" && !blockedBy.length && !approvals.some((item) =>
             ["pending", "approved"].includes(item.status)
           ) && (
             <button
@@ -550,6 +559,11 @@ export default function ActionDetailPanel(
             >
               Request approval
             </button>
+          )}
+          {action.executionMode === "manual" && !blockedBy.length && (
+            <p className="max-w-xl text-xs leading-5 text-slate-400">
+              This step is for you to complete. TRESTLE has no real provider for it, so requesting automated permission would not make it executable. Use the Workflow Copilot to record your progress.
+            </p>
           )}
           {approvals.find((item) => item.status === "pending") && (
             <>

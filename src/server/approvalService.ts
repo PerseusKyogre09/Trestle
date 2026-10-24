@@ -227,6 +227,13 @@ export async function approveRequest(
       409,
     );
   }
+  const action = await prisma.action.findUnique({ where: { id: updated.actionId } });
+  if (action?.status === "awaiting_approval") {
+    // Return the approved action to dependency-ready state. The workflow
+    // orchestrator will revalidate the exact payload immediately before calling
+    // the execution controller; approval never executes provider work itself.
+    await updateAction(updated.actionId, "ready");
+  }
   return updated;
 }
 

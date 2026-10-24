@@ -15,7 +15,11 @@ import {
   updateExecutionAttempt,
 } from "../repository";
 import { providerRegistry } from "./registry";
-import type { ExecutionContext, ProviderExecutionResult } from "./types";
+import type {
+  ExecutionContext,
+  ProviderExecutionResult,
+  ProviderProgressEvent,
+} from "./types";
 
 export class ExecutionControllerError extends Error {
   constructor(message: string, public statusCode: number = 400) {
@@ -102,6 +106,7 @@ export class ExecutionController {
     options: {
       operation?: ProposedOperation;
       providerName?: string;
+      onProgress?: (event: ProviderProgressEvent) => Promise<void>;
     } = {},
   ): Promise<ExecutionControllerResult> {
     // 1. Prevent duplicate concurrent execution
@@ -246,6 +251,7 @@ export class ExecutionController {
         actionId,
         approvalId,
         operation,
+        onProgress: options.onProgress,
       };
 
       const eligibility = await provider.checkEligibility(executionContext);
@@ -275,6 +281,15 @@ export class ExecutionController {
         status: "running",
         isSimulated: provider.name === "mock-provider",
       });
+
+      const progressTrace: ProviderProgressEvent[] = [];
+      executionContext.onProgress = async (event) => {
+        progressTrace.push(event);
+        await updateExecutionAttempt(attempt.id, {
+          resultDetails: JSON.stringify({ trace: progressTrace }),
+        });
+        await options.onProgress?.(event);
+      };
 
       // 10. Execute operation through provider
       let providerResult: ProviderExecutionResult;
