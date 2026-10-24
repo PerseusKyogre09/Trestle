@@ -4,9 +4,26 @@ import type {
   ExecutionProvider,
   ProviderExecutionResult,
 } from "./types";
+import { createResearchBrief } from "../privacyBoundary";
 
 const endpoint = "https://agent.tinyfish.ai/v1/automation/run-sse";
-const timeoutMs = 120_000;
+
+function getTinyFishApiKey(): string {
+  return process.env.TINYFISH_API_KEY?.trim() ?? "";
+}
+
+async function safeErrorBody(response: Response): Promise<string> {
+  try {
+    const text = await response.text();
+    return text
+      .replace(/sk-tinyfish-[A-Za-z0-9_-]+/g, "[redacted-key]")
+      .replace(/("?X-API-Key"?\s*:\s*")[^"]+/gi, "$1[redacted]")
+      .replace(/("?authorization"?\s*:\s*")[^"]+/gi, "$1[redacted]")
+      .slice(0, 500);
+  } catch {
+    return "Unable to read TinyFish error response.";
+  }
+}
 
 type TinyFishEvent = {
   type?: string;
@@ -18,6 +35,11 @@ type TinyFishEvent = {
 };
 
 export function parseSseBlock(block: string): TinyFishEvent | null {
+  const eventName = block
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("event:"))
+    ?.slice(6)
+    .trim();
   const data = block
     .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
@@ -28,7 +50,9 @@ export function parseSseBlock(block: string): TinyFishEvent | null {
   if (!parsed || typeof parsed !== "object") {
     throw new Error("TinyFish returned a malformed SSE event.");
   }
-  return parsed as TinyFishEvent;
+  const event = parsed as TinyFishEvent;
+  if (!event.type && eventName) event.type = eventName;
+  return event;
 }
 
 function textError(error: TinyFishEvent["error"]): string {
@@ -41,6 +65,22 @@ function normalizeResult(result: unknown): Record<string, unknown> {
     throw new Error("TinyFish returned no structured research result.");
   }
   return result as Record<string, unknown>;
+}
+
+function nonEmptyStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function validHttpsUrls(value: unknown): string[] {
+  return nonEmptyStringArray(value).filter((candidate) => {
+    try {
+      return new URL(candidate).protocol === "https:";
+    } catch {
+      return false;
+    }
+  });
 }
 
 function researchGoal(jurisdiction: string, documentType: string): string {
@@ -62,7 +102,7 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
   }
 
   async checkEligibility(context: ExecutionContext): Promise<EligibilityResult> {
-    if (!process.env.TINYFISH_API_KEY) {
+    if (!getTinyFishApiKey()) {
       return { eligible: false, supportsOperation: true, reason: "TINYFISH_API_KEY is not configured." };
     }
     if (context.operation.operationType !== "lost_document_research") {
@@ -75,21 +115,21 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
     const payload = context.operation.payload;
     const jurisdiction = typeof payload.jurisdiction === "string" ? payload.jurisdiction : "";
     const documentType = typeof payload.documentType === "string" ? payload.documentType : "";
-    if (!jurisdiction || !documentType) throw new Error("TinyFish research requires jurisdiction and document type.");
+    const researchBrief = createResearchBrief(jurisdiction, documentType);
+    if (!researchBrief) throw new Error("TinyFish research requires generic, non-personal jurisdiction and document type values.");
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${jurisdiction} official replace lost ${documentType}`)}`;
+    const apiKey = getTinyFishApiKey();
     let response: Response;
     try {
       response = await this.fetchImpl(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json", "X-API-Key": process.env.TINYFISH_API_KEY ?? "" },
+        headers: { "content-type": "application/json", "X-API-Key": apiKey },
         body: JSON.stringify({
           url: searchUrl,
-          goal: researchGoal(jurisdiction, documentType),
+          goal: researchGoal(researchBrief.jurisdiction, researchBrief.documentType),
           browser_profile: "lite",
-          agent_config: { max_duration_seconds: 110 },
+          agent_config: { max_duration_seconds: 180 },
           output_schema: {
             type: "object",
             properties: {
@@ -104,49 +144,116 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
             required: ["summary", "sourceUrls", "requirements", "requiredDocuments", "fees", "nextSteps", "unknowns"],
           },
         }),
-        signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        return this.failed(`TinyFish HTTP request failed with status ${response.status}.`);
+        const errorBody = await safeErrorBody(response);
+        console.error("TinyFish request rejected", {
+          endpoint,
+          keyPresent: Boolean(apiKey),
+          upstreamStatus: response.status,
+          errorBody,
+        });
+        return this.failed(
+          response.status === 401
+            ? `TinyFish authentication failed (401). The running server sent a ${apiKey ? "present" : "missing"} API key. Check the active server environment and restart it after changing .env.local.`
+            : `TinyFish HTTP request failed with status ${response.status}. Check the server log for sanitized upstream details.`,
+        );
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let complete: TinyFishEvent | undefined;
-      while (true) {
+      const trace: Array<Record<string, unknown>> = [];
+      let shouldStopReading = false;
+      const recordEvent = (event: TinyFishEvent) => {
+        trace.push({
+          type: event.type,
+          runId: event.run_id,
+          timestamp: (event as { timestamp?: unknown }).timestamp,
+          purpose: (event as { purpose?: unknown }).purpose,
+          streamingUrl: event.streaming_url,
+          status: event.status,
+        });
+        if (event.type === "COMPLETE") {
+          complete = event;
+          shouldStopReading = true;
+        }
+      };
+      while (!shouldStopReading) {
         const next = await reader.read();
         buffer += decoder.decode(next.value ?? new Uint8Array(), { stream: !next.done });
         const blocks = buffer.split(/\r?\n\r?\n/);
         buffer = blocks.pop() ?? "";
         for (const block of blocks) {
           const event = parseSseBlock(block);
-          if (event?.type === "COMPLETE") complete = event;
+          if (event) recordEvent(event);
+          if (shouldStopReading) break;
+        }
+        if (!shouldStopReading && buffer.endsWith("\n")) {
+          const looseLines = buffer.split(/\r?\n/).filter(Boolean);
+          if (looseLines.every((line) => line.startsWith("data:") || line.startsWith("event:"))) {
+            for (const line of looseLines) {
+              if (!line.startsWith("data:")) continue;
+              const event = parseSseBlock(line);
+              if (event) recordEvent(event);
+              if (shouldStopReading) break;
+            }
+            buffer = "";
+          }
         }
         if (next.done) break;
       }
+      if (shouldStopReading) {
+        await reader.cancel().catch(() => undefined);
+      }
       if (buffer.trim()) {
         const event = parseSseBlock(buffer);
-        if (event?.type === "COMPLETE") complete = event;
+        if (event) recordEvent(event);
       }
-      if (!complete) return this.uncertain("TinyFish stream ended without a COMPLETE event.");
+      if (!complete) {
+        console.error("TinyFish stream ended without a terminal event", {
+          endpoint,
+          traceTypes: trace.map((event) => event.type).filter(Boolean),
+        });
+        return this.uncertain("TinyFish stream ended without a COMPLETE event.");
+      }
       if (complete.status !== "COMPLETED") return this.failed(textError(complete.error));
       const details = normalizeResult(complete.result);
+      const sourceUrls = validHttpsUrls(details.sourceUrls);
+      const hasProcedureDetails = nonEmptyStringArray(details.requirements).length > 0 ||
+        nonEmptyStringArray(details.nextSteps).length > 0;
+      const criteriaSatisfied = sourceUrls.length > 0 && hasProcedureDetails;
+      const evidence = criteriaSatisfied
+        ? {
+          kind: "verified" as const,
+          note: `TinyFish read-only research returned ${sourceUrls.length} HTTPS source(s) and procedure details. Research only; no external application or action was completed.`,
+          recordedAt: new Date().toISOString(),
+        }
+        : undefined;
       return {
         attemptId: crypto.randomUUID(),
         status: "succeeded",
         providerName: this.name,
         isSimulated: false,
         resultSummary: typeof details.summary === "string" ? details.summary : "TinyFish research completed.",
-        details: { ...details, simulated: false, runId: complete.run_id, note: "Research result only; no external action was submitted." },
-        canVerifyOutcome: false,
+        details: {
+          ...details,
+          simulated: false,
+          runId: complete.run_id,
+          trace,
+          note: "Research result only; no external action was submitted.",
+        },
+        evidence,
+        canVerifyOutcome: criteriaSatisfied,
       };
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return this.uncertain("TinyFish timed out before a final result was received.");
       if (error instanceof SyntaxError) return this.uncertain("TinyFish returned malformed SSE data.");
+      console.error("TinyFish provider runtime error", {
+        endpoint,
+        error: error instanceof Error ? error.message : "Unknown provider error",
+      });
       throw error;
-    } finally {
-      clearTimeout(timer);
     }
   }
 

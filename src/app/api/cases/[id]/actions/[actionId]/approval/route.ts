@@ -5,6 +5,7 @@ import {
   requestApproval,
 } from "../../../../../../../server/approvalService";
 import { getCase } from "../../../../../../../server/repository";
+import { buildOperationForAction, OperationFactoryError } from "../../../../../../../server/operationFactory";
 
 export async function POST(
   request: Request,
@@ -34,15 +35,19 @@ export async function POST(
   }
 
   try {
+    const operation = buildOperationForAction(
+      action,
+      parsed.data.context ?? {},
+    );
     const approval = await requestApproval(
       id,
       actionId,
-      parsed.data.operation,
+      operation,
       parsed.data.expiresInSeconds,
     );
     return NextResponse.json(approval, { status: 201 });
   } catch (error) {
-    if (error instanceof ApprovalError) {
+    if (error instanceof ApprovalError || error instanceof OperationFactoryError) {
       return NextResponse.json({ error: error.message }, {
         status: error.statusCode,
       });

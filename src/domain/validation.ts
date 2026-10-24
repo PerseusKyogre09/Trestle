@@ -51,6 +51,24 @@ export const createCaseSchema = z.object({
     10,
     "Describe the life event in more detail.",
   ),
+  workflow: z.object({
+    title: z.string().min(1),
+    description: z.string().min(1),
+    actions: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      description: z.string().min(1),
+      status: z.literal("pending"),
+      priority: z.enum(priorities),
+      dependencies: z.array(z.string()),
+      requiredInputs: z.array(z.string()),
+      riskLevel: z.enum(riskLevels),
+      approvalRequired: z.boolean(),
+      successCriteria: z.array(z.string().min(1)),
+      evidence: z.array(evidenceSchema),
+      executionMode: z.enum(executionModes),
+    })).min(1),
+  }).optional(),
 });
 
 export const transitionSchema = z.object({
@@ -71,7 +89,8 @@ export const proposedOperationSchema = z.object({
 });
 
 export const requestApprovalSchema = z.object({
-  operation: proposedOperationSchema,
+  context: z.record(z.string(), z.unknown()).optional(),
+  operation: proposedOperationSchema.optional(),
   expiresInSeconds: z.number().int().positive().optional(),
 });
 

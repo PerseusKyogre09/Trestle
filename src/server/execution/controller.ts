@@ -44,6 +44,50 @@ export interface ExecutionControllerResult {
   policyReasons: string[];
 }
 
+function meetsConfiguredSuccessCriteria(
+  action: Action,
+  operation: ProposedOperation,
+  providerResult: ProviderExecutionResult,
+): boolean {
+  if (
+    operation.operationType === "enter_form_details" ||
+    operation.operationType === "populate_form" ||
+    operation.operationType === "select_document_upload" ||
+    operation.operationType === "click_element" ||
+    operation.payload.isIntermediateStep === true ||
+    !providerResult.canVerifyOutcome ||
+    !providerResult.evidence
+  ) {
+    return false;
+  }
+
+  if (operation.operationType !== "lost_document_research") return true;
+
+  const details = providerResult.details ?? {};
+  const sourceUrls = Array.isArray(details.sourceUrls)
+    ? details.sourceUrls.filter((url): url is string => {
+      if (typeof url !== "string") return false;
+      try {
+        return new URL(url).protocol === "https:";
+      } catch {
+        return false;
+      }
+    })
+    : [];
+  const hasProcedureDetails = [details.requirements, details.nextSteps].some(
+    (items) => Array.isArray(items) && items.some(
+      (item) => typeof item === "string" && item.trim().length > 0,
+    ),
+  );
+
+  return action.successCriteria.every((criterion) => {
+    const normalized = criterion.toLowerCase();
+    if (normalized.includes("official source")) return sourceUrls.length > 0;
+    if (normalized.includes("procedure")) return hasProcedureDetails;
+    return false;
+  });
+}
+
 // In-memory concurrency locks to prevent duplicate concurrent executions on the same action
 const activeExecutionLocks = new Set<string>();
 
@@ -117,7 +161,7 @@ export class ExecutionController {
       }
 
       // 4. Construct proposed operation if not provided
-      const operation: ProposedOperation = options.operation ?? {
+      let operation: ProposedOperation = options.operation ?? {
         operationType: action.approvalRequired
           ? "review_action"
           : "read_public_info",
@@ -125,6 +169,25 @@ export class ExecutionController {
         destination: undefined,
         payload: { actionId: action.id, title: action.title },
       };
+
+      const approvedOperation = action.approvals?.find((approval) =>
+        approval.status === "approved"
+      );
+      if (!options.operation && approvedOperation) {
+        try {
+          operation = {
+            operationType: approvedOperation.operationType,
+            description: approvedOperation.operationDescription,
+            destination: approvedOperation.destination ?? undefined,
+            payload: JSON.parse(approvedOperation.payload) as Record<string, unknown>,
+          };
+        } catch {
+          throw new ExecutionControllerError(
+            "The approved operation could not be read safely.",
+            409,
+          );
+        }
+      }
 
       // 5. Evaluate central permission policy
       const policy = evaluatePolicy(action, operation);
@@ -314,17 +377,7 @@ export class ExecutionController {
 
     // Case 3: Provider reported success -> Verify against success criteria
     // Rule: "Never mark an action completed merely because the provider returned a successful click or form-fill response."
-    const isIntermediateOnly =
-      operation.operationType === "enter_form_details" ||
-      operation.operationType === "populate_form" ||
-      operation.operationType === "select_document_upload" ||
-      operation.operationType === "click_element" ||
-      operation.payload.isIntermediateStep === true;
-
-    if (
-      isIntermediateOnly || !providerResult.canVerifyOutcome ||
-      !providerResult.evidence
-    ) {
+    if (!meetsConfiguredSuccessCriteria(action, operation, providerResult)) {
       // Operation succeeded at the provider, but cannot verify complete action satisfaction yet
       await updateExecutionAttempt(attemptId, {
         status: "succeeded",

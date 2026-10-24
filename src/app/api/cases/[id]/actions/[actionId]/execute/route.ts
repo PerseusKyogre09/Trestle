@@ -25,7 +25,8 @@ export async function POST(
 
   try {
     const result = await executionController.execute(id, actionId, {
-      operation: parsed.data.operation,
+      // Operation details are derived from the persisted action and approval
+      // inside the controller. Client-supplied operation fields are ignored.
       providerName: parsed.data.provider,
     });
     return NextResponse.json(result);

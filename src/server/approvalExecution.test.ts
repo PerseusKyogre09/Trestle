@@ -9,7 +9,9 @@ import {
 } from "./approvalService";
 import { executionController } from "./execution/controller";
 import { MockExecutionProvider } from "./execution/mockProvider";
-import { createCase, updateAction } from "./repository";
+import { TinyFishExecutionProvider } from "./execution/tinyfishProvider";
+import { providerRegistry } from "./execution/registry";
+import { createCase, getCase, updateAction } from "./repository";
 import { prisma } from "./db";
 
 describe("Human Approval & Action Execution Framework", () => {
@@ -270,6 +272,126 @@ describe("Human Approval & Action Execution Framework", () => {
   });
 
   describe("Execution Controller & Outcome Verification", () => {
+    it.each([
+      { name: "failure", status: "failed" as const },
+      { name: "timeout", status: "uncertain" as const },
+      { name: "uncertain result", status: "uncertain" as const },
+    ])("never completes live research after $name", async ({ status }) => {
+      const researchActionId = "identify-reporting";
+      const operation = {
+        operationType: "lost_document_research",
+        description: "Research official lost document guidance.",
+        payload: {
+          jurisdiction: "India",
+          documentType: "Indian driving licence",
+        },
+      };
+      const approval = await requestApproval(caseId, researchActionId, operation);
+      await approveRequest(caseId, approval.id);
+
+      providerRegistry.register({
+        name: "tinyfish",
+        checkEligibility: async () => ({ eligible: true, supportsOperation: true }),
+        execute: async () => ({
+          attemptId: `live-${status}`,
+          status,
+          providerName: "tinyfish",
+          isSimulated: false,
+          resultSummary: status === "failed" ? "Research failed." : "Research is inconclusive.",
+          ...(status === "uncertain" ? { uncertaintyReason: "Provider timed out before final verification." } : {}),
+          canVerifyOutcome: false,
+        }),
+        getStatus: async () => null,
+      });
+
+      try {
+        const result = await executionController.execute(caseId, researchActionId, {
+          operation,
+          providerName: "tinyfish",
+        });
+        expect(result.status).toBe(status);
+
+        const persisted = await prisma.action.findUnique({
+          where: { id: researchActionId },
+        });
+        expect(persisted?.status).not.toBe("completed");
+        if (status === "failed") expect(persisted?.status).toBe("failed");
+        if (status === "uncertain") expect(persisted?.status).toBe("in_progress");
+
+        const refreshedCase = await getCase(caseId);
+        expect(refreshedCase?.actions.find((a) => a.id === "replacement-requirements")?.status)
+          .toBe("blocked");
+      } finally {
+        providerRegistry.register(new TinyFishExecutionProvider());
+      }
+    });
+
+    it("completes successful TinyFish research and makes its dependent action ready", async () => {
+      const researchActionId = "identify-reporting";
+      const dependentActionId = "replacement-requirements";
+      const operation = {
+        operationType: "lost_document_research",
+        description: "Research official lost document guidance.",
+        payload: {
+          jurisdiction: "India",
+          documentType: "Indian driving licence",
+        },
+      };
+      const approval = await requestApproval(caseId, researchActionId, operation);
+      await approveRequest(caseId, approval.id);
+      await prisma.action.update({
+        where: { id: dependentActionId },
+        data: { status: "blocked" },
+      });
+
+      providerRegistry.register({
+        name: "tinyfish",
+        checkEligibility: async () => ({ eligible: true, supportsOperation: true }),
+        execute: async () => ({
+          attemptId: "live-run-test",
+          status: "succeeded",
+          providerName: "tinyfish",
+          isSimulated: false,
+          resultSummary: "Official replacement guidance found.",
+          details: {
+            sourceUrls: ["https://parivahan.gov.in/example"],
+            requirements: ["Follow the issuing authority's process"],
+            nextSteps: ["Review the official guidance"],
+          },
+          evidence: {
+            kind: "verified",
+            note: "TinyFish research returned official source and procedure details.",
+            recordedAt: new Date().toISOString(),
+          },
+          canVerifyOutcome: true,
+        }),
+        getStatus: async () => null,
+      });
+
+      try {
+        const result = await executionController.execute(caseId, researchActionId, {
+          operation,
+          providerName: "tinyfish",
+        });
+
+        expect(result.status).toBe("succeeded");
+        expect(result.outcome).toBe("verified");
+        expect(result.isSimulated).toBe(false);
+        const persisted = await prisma.action.findUnique({
+          where: { id: researchActionId },
+        });
+        expect(persisted?.status).toBe("completed");
+
+        const refreshedCase = await getCase(caseId);
+        expect(refreshedCase?.actions.find((a) => a.id === dependentActionId)?.status)
+          .toBe("ready");
+        expect(refreshedCase?.actions.find((a) => a.id === dependentActionId)?.status)
+          .not.toBe("completed");
+      } finally {
+        providerRegistry.register(new TinyFishExecutionProvider());
+      }
+    });
+
     it("blocks execution when action prerequisites are incomplete", async () => {
       // check-transactions depends on secure-cards, which is currently pending
       await expect(

@@ -159,6 +159,14 @@ cp .env.example .env.local
 
 The mock provider remains the default. A live run requires a separate approval for the exact jurisdiction, document type, and research operation. The local app currently has no authentication or multi-user authorization, so keep live use to a local demo.
 
+### AI privacy boundary
+
+Groq is a planning-only service. It receives a minimized `PlanningBrief` containing an event category, a coarse jurisdiction when recognized, generic document types, and a fixed planning goal. It does not receive the raw user prompt, case records, names, addresses, contact details, document numbers, account values, form fields, files, or execution tools. Groq output is untrusted and must pass Zod validation and dependency-graph validation before a case is persisted.
+
+TinyFish receives only the explicitly approved generic research operation: a jurisdiction and document type. It never receives private case data, completed form values, uploaded documents, account information, or credentials. TRESTLE remains the only component that owns persistence, approvals, dependency checks, provider invocation, and action status transitions.
+
+The privacy boundary is conservative rather than a guarantee of perfect anonymization. Email addresses, phone-like values, common account/document-number patterns, and similar sensitive values are rejected before an outbound request. If the event cannot be safely reduced to a generic brief, the user must reformulate it without personal details.
+
 The implementation lives in `src/server/execution/tinyfishProvider.ts` and is registered beside the mock provider. Because the execution controller manages approvals, concurrency, and policy independently of provider implementations, the adapter uses the existing approval lifecycle and execution history.
 
 ---

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { RuleBasedWorkflowCompiler } from "../../../domain/compiler";
 import { createCase, listCases } from "../../../server/repository";
 import { createCaseSchema } from "../../../domain/validation";
+import { validateGraph } from "../../../domain/engine";
 
 export async function GET() {
   return NextResponse.json(await listCases());
@@ -15,15 +15,16 @@ export async function POST(request: Request) {
       error: parsed.error.issues[0]?.message ?? "Invalid request.",
     }, { status: 400 });
   }
-  const compiled = new RuleBasedWorkflowCompiler().compile(
-    parsed.data.originalInput,
-  );
-  if (!compiled.workflow) {
-    return NextResponse.json({ error: compiled.error }, { status: 422 });
+  const workflow = parsed.data.workflow;
+  if (workflow) {
+    const graph = validateGraph(workflow.actions);
+    if (!graph.ok) return NextResponse.json({ error: graph.error }, { status: 422 });
+  } else {
+    return NextResponse.json({ error: "Review a proposed workflow before creating a case." }, { status: 400 });
   }
   try {
     return NextResponse.json(
-      await createCase(parsed.data.originalInput, compiled.workflow),
+      await createCase(parsed.data.originalInput, workflow),
       { status: 201 },
     );
   } catch {

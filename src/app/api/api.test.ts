@@ -62,14 +62,7 @@ describe("Route Handlers API Integration", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: {
-            operationType: "enter_form_details",
-            description: "Card lock request",
-            destination: "https://bank.example/freeze",
-            payload: { cardId: "card_4321" },
-          },
-        }),
+        body: JSON.stringify({ context: {} }),
       },
     );
     const approvalRes = await requestApprovalRoute(approvalReq, {
@@ -117,14 +110,7 @@ describe("Route Handlers API Integration", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: {
-            operationType: "enter_form_details",
-            description: "Card lock request",
-            destination: "https://bank.example/freeze",
-            payload: { cardId: "card_4321" },
-          },
-        }),
+        body: JSON.stringify({}),
       },
     );
     const executeRes = await executeRoute(executeReq, {

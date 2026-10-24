@@ -174,7 +174,7 @@ export default function ActionDetailPanel(
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation }),
+        body: JSON.stringify({ context: {} }),
       },
     );
     const data = await response.json();
@@ -210,7 +210,7 @@ export default function ActionDetailPanel(
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation }),
+        body: JSON.stringify({}),
       },
     );
     const data = await response.json();
@@ -235,7 +235,7 @@ export default function ActionDetailPanel(
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operation: liveOperation }),
+        body: JSON.stringify({ context: { jurisdiction, documentType } }),
       },
     );
     const data = await response.json();

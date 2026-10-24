@@ -152,7 +152,7 @@ const mapCase = (
     createdAt: result.createdAt.toISOString(),
     updatedAt: result.updatedAt.toISOString(),
     actions: actions.map((a: Action) =>
-      a.status === "pending"
+      a.status === "pending" || a.status === "blocked"
         ? {
           ...a,
           status: ready.find((r) => r.id === a.id)?.ready ? "ready" : "blocked",

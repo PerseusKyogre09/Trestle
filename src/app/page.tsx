@@ -1,13 +1,14 @@
 "use client";
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import type { Case } from "../domain/types";
+import type { Case, Workflow } from "../domain/types";
 
 export default function Home() {
   const [input, setInput] = useState("");
   const [cases, setCases] = useState<Case[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [proposal, setProposal] = useState<Workflow | null>(null);
   useEffect(() => {
     fetch("/api/cases").then((r) => r.ok ? r.json() : []).then(setCases).catch(
       () => setMessage("Cases could not be loaded. Run database setup first."),
@@ -17,7 +18,7 @@ export default function Home() {
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const response = await fetch("/api/cases", {
+    const response = await fetch("/api/plans", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ originalInput: input }),
@@ -28,8 +29,27 @@ export default function Home() {
       setMessage(data.error ?? "Compilation failed.");
       return;
     }
+    setProposal(data.workflow);
+    setMessage(data.source === "deterministic-fallback" ? "Deterministic fallback plan ready for review." : "AI proposal ready for review.");
+  }
+  async function saveProposal() {
+    if (!proposal) return;
+    setLoading(true);
+    const response = await fetch("/api/cases", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ originalInput: input, workflow: proposal }),
+    });
+    const data = await response.json();
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(data.error ?? "Could not save the reviewed workflow.");
+      return;
+    }
     setCases((current) => [data, ...current]);
+    setProposal(null);
     setInput("");
+    setMessage("Reviewed workflow saved as an active case.");
   }
   return (
     <main className="mx-auto min-h-screen max-w-6xl px-6 py-10 sm:px-10">
@@ -64,16 +84,44 @@ export default function Home() {
             disabled={loading}
             className="mt-4 rounded-lg bg-blue-500 px-5 py-3 font-medium text-white hover:bg-blue-400 disabled:opacity-50"
           >
-            {loading ? "Compiling…" : "Compile event"}
+            {loading ? "Planning…" : "Plan event"}
           </button>
           {message && (
             <p role="alert" className="mt-4 text-sm text-rose-300">{message}</p>
           )}
           <p className="mt-5 text-xs leading-5 text-slate-500">
-            The current compiler is deterministic and supports lost-wallet
-            events involving cards or identity documents.
+            Your description is classified locally. The proposed workflow must be reviewed before it is saved.
           </p>
         </form>
+        {proposal && (
+          <section className="rounded-2xl border border-blue-400/30 bg-slate-900/80 p-6 lg:col-span-2">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-blue-300">Proposed workflow</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-100">{proposal.title}</h2>
+                <p className="mt-2 text-sm text-slate-400">{proposal.description}</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setProposal(null)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300">Reject</button>
+                <button type="button" onClick={saveProposal} disabled={loading} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-50">Save reviewed workflow</button>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              {proposal.actions.map((action, index) => (
+                <article key={action.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-medium text-slate-100">{index + 1}. {action.title}</h3>
+                    <span className="text-xs uppercase text-amber-300">{action.riskLevel}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-400">{action.description}</p>
+                  <p className="mt-2 text-xs text-slate-500">{action.dependencies.length ? `After: ${action.dependencies.join(", ")}` : "Independent task"}</p>
+                  <p className="mt-1 text-xs text-slate-500">{action.approvalRequired ? "Human approval required" : "No approval flagged"} · {action.executionMode === "manual" ? "User action" : "Assisted"}</p>
+                  <p className="mt-1 text-xs text-slate-500">Success: {action.successCriteria.join(" ")}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
         <section>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xl font-semibold text-slate-100">Cases</h2>
