@@ -1,10 +1,13 @@
 import { z } from "zod";
 import {
   actionStatuses,
+  approvalStatuses,
   caseStatuses,
   evidenceKinds,
   executionModes,
+  executionStatuses,
   priorities,
+  riskCategories,
   riskLevels,
 } from "./types";
 
@@ -13,6 +16,7 @@ export const evidenceSchema = z.object({
   note: z.string().min(1),
   recordedAt: z.string(),
 });
+
 export const actionSchema = z.object({
   id: z.string().min(1),
   caseId: z.string().min(1),
@@ -30,6 +34,7 @@ export const actionSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+
 export const caseSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -40,14 +45,45 @@ export const caseSchema = z.object({
   updatedAt: z.string(),
   actions: z.array(actionSchema),
 });
+
 export const createCaseSchema = z.object({
   originalInput: z.string().trim().min(
     10,
     "Describe the life event in more detail.",
   ),
 });
+
 export const transitionSchema = z.object({
   status: z.enum(["in_progress", "completed", "failed"]),
   evidence: evidenceSchema.optional(),
   note: z.string().optional(),
+});
+
+export const approvalStatusSchema = z.enum(approvalStatuses);
+export const riskCategorySchema = z.enum(riskCategories);
+export const executionStatusSchema = z.enum(executionStatuses);
+
+export const proposedOperationSchema = z.object({
+  operationType: z.string().min(1, "Operation type is required."),
+  description: z.string().min(1, "Description is required."),
+  destination: z.string().optional(),
+  payload: z.record(z.string(), z.unknown()),
+  prohibitsAutomation: z.boolean().optional(),
+});
+
+export const requestApprovalSchema = z.object({
+  operation: proposedOperationSchema,
+  expiresInSeconds: z.number().int().positive().optional(),
+});
+
+export const decideApprovalSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+  notes: z.string().optional(),
+  reason: z.string().optional(),
+  decidedBy: z.string().optional(),
+});
+
+export const executeActionSchema = z.object({
+  operation: proposedOperationSchema.optional(),
+  provider: z.string().optional(),
 });
