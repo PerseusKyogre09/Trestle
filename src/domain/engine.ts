@@ -72,13 +72,14 @@ export function readiness(
 
 const allowed: Record<ActionStatus, ActionStatus[]> = {
   pending: ["ready", "in_progress", "failed"],
-  ready: ["in_progress", "failed"],
+  ready: ["in_progress", "awaiting_approval", "failed"],
   in_progress: ["completed", "failed", "awaiting_approval"],
-  awaiting_approval: ["in_progress", "failed"],
+  awaiting_approval: ["in_progress", "ready", "failed"],
   blocked: ["ready", "failed"],
   completed: [],
-  failed: ["in_progress"],
+  failed: ["in_progress", "ready"],
 };
+
 export function assertTransition(
   from: ActionStatus,
   to: ActionStatus,
