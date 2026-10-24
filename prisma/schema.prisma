@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Case {
+  id           String   @id
+  title        String
+  description  String
+  originalInput String
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  actions      Action[]
+}
+
+model Action {
+  id               String   @id
+  caseId           String
+  title            String
+  description      String
+  status           String   @default("pending")
+  priority         String
+  riskLevel        String
+  approvalRequired Boolean  @default(false)
+  requiredInputs   String
+  successCriteria  String
+  evidence         String
+  executionMode    String
+  dependencies     String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  case             Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
