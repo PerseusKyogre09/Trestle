@@ -5,6 +5,7 @@ import {
   continueSharedBrowserWithAgent,
   endSharedBrowserSession,
   getSharedBrowserSnapshot,
+  refreshSharedBrowserOfficialSite,
   runSharedBrowserUserCommand,
   startOrReconnectSharedBrowser,
   takeSharedBrowserControl,
@@ -13,10 +14,16 @@ import {
 export const runtime = "nodejs";
 
 const commandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("start") }).strict(),
+  z.object({
+    action: z.literal("start"),
+    institution: z.string().trim().max(100).optional(),
+    testMode: z.boolean().optional(),
+    developmentUrl: z.string().trim().max(2000).optional(),
+  }).strict(),
   z.object({ action: z.literal("take-control") }).strict(),
   z.object({ action: z.literal("pause-agent") }).strict(),
   z.object({ action: z.literal("return-to-agent") }).strict(),
+  z.object({ action: z.literal("refresh-official-site") }).strict(),
   z.object({ action: z.literal("end") }).strict(),
   z.object({ action: z.literal("click"), x: z.number().finite(), y: z.number().finite() }).strict(),
   z.object({ action: z.literal("type"), text: z.string().max(300) }).strict(),
@@ -69,12 +76,17 @@ export async function POST(
   try {
     const command = parsed.data;
     if (command.action === "start") {
-      const snapshot = await startOrReconnectSharedBrowser(id);
+      const snapshot = await startOrReconnectSharedBrowser(id, {
+        institution: command.institution,
+        testMode: command.testMode,
+        developmentUrl: command.developmentUrl,
+      });
       return NextResponse.json({ ...snapshot, screenshot: null });
     }
     if (command.action === "take-control") return NextResponse.json(await takeSharedBrowserControl(id, "user"));
     if (command.action === "pause-agent") return NextResponse.json(await takeSharedBrowserControl(id, "paused"));
     if (command.action === "return-to-agent") return NextResponse.json(await continueSharedBrowserWithAgent(id));
+    if (command.action === "refresh-official-site") return NextResponse.json(await refreshSharedBrowserOfficialSite(id));
     if (command.action === "end") return NextResponse.json(await endSharedBrowserSession(id));
     const { action: type, ...args } = command;
     const startedAt = performance.now();

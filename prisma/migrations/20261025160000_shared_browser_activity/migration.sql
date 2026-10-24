@@ -1,0 +1,2 @@
+-- No-op compatibility migration. The browser activity columns were included in
+-- 20261025150000_shared_browser_sessions before this migration directory was created.

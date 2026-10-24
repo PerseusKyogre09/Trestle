@@ -125,6 +125,13 @@ model SharedBrowserSession {
   currentUrl          String?
   pageTitle           String?
   lastActivity        String?
+  selectedUrl         String?
+  selectionSource     String?
+  selectionReason     String?
+  actionId            String?
+  institution         String?
+  allowedDomain       String?
+  isTestMode          Boolean  @default(false)
   activeLock          String?  @unique
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

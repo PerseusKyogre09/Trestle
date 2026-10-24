@@ -2,6 +2,7 @@ import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { prisma } from "./db";
+import { isAllowedNavigation, isSafeDevelopmentUrl, resolveCaseWebsite, type WebsiteSelection } from "./websiteResolver";
 
 const browserApiEndpoint = "https://api.browser.tinyfish.ai";
 const demoUrl = "https://the-internet.herokuapp.com/";
@@ -19,6 +20,13 @@ type BrowserSessionRecord = {
   pageTitle: string | null;
   lastActivity: string | null;
   activeLock: string | null;
+  selectedUrl: string | null;
+  selectionSource: string | null;
+  selectionReason: string | null;
+  actionId: string | null;
+  institution: string | null;
+  allowedDomain: string | null;
+  isTestMode: boolean;
 };
 
 export type SharedBrowserSnapshot = {
@@ -32,6 +40,12 @@ export type SharedBrowserSnapshot = {
   screenshot: string | null;
   viewport: { width: number; height: number } | null;
   notice?: string;
+  actionId?: string | null;
+  institution?: string | null;
+  selectedUrl?: string | null;
+  selectionSource?: string | null;
+  selectionReason?: string | null;
+  isTestMode?: boolean;
 };
 
 function apiKey(): string {
@@ -76,7 +90,7 @@ function decryptConnection(value: string): { cdpUrl: string; baseUrl: string } {
 function safeDisplayUrl(raw: string): string | null {
   try {
     const url = new URL(raw);
-    if (url.protocol !== "https:") return null;
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
     return `${url.origin}${url.pathname}`.slice(0, 500);
   } catch {
     return null;
@@ -104,7 +118,7 @@ class TinyFishCdp {
   private readonly frameListeners = new Set<(frame: { data: string; width: number; height: number; sentAt: number }) => void>();
   private lastFrameLogAt = 0;
 
-  constructor(cdpUrl: string) {
+  constructor(cdpUrl: string, readonly allowedDomain: string) {
     if (typeof WebSocket === "undefined") {
       throw new Error("This Node.js runtime does not provide WebSocket support for TinyFish Browser API sessions.");
     }
@@ -129,14 +143,27 @@ class TinyFishCdp {
     });
 
     let pageTarget: Record<string, unknown> | undefined;
-    for (let attempt = 0; attempt < 20 && !pageTarget; attempt += 1) {
+    let targetKinds: string[] = [];
+    for (let attempt = 0; attempt < 4 && !pageTarget; attempt += 1) {
       const targets = await this.sendRaw("Target.getTargets", {});
       const infos = Array.isArray(targets.targetInfos) ? targets.targetInfos as Record<string, unknown>[] : [];
+      targetKinds = infos
+        .map((target) => typeof target.type === "string" ? target.type : "unknown")
+        .slice(0, 10);
       pageTarget = infos.find((target) => target.type === "page");
       if (!pageTarget) await new Promise((resolve) => setTimeout(resolve, 500));
     }
+    if (!pageTarget) {
+      // TinyFish may return a valid blank browser session before exposing its
+      // initial page target. Create a tab inside this same CDP browser session.
+      const created = await this.sendRaw("Target.createTarget", { url: "about:blank" });
+      if (typeof created.targetId === "string") {
+        pageTarget = { targetId: created.targetId, type: "page" };
+      }
+    }
     if (!pageTarget || typeof pageTarget.targetId !== "string") {
-      throw new Error("TinyFish created the session, but its page did not become available.");
+      console.warn("TinyFish browser session did not expose or create a page target", { targetKinds });
+      throw new Error("TinyFish created the browser session, but TRESTLE could not open a page in it. The session was closed; retry once, or end the stale session before retrying.");
     }
     const attached = await this.sendRaw("Target.attachToTarget", {
       targetId: pageTarget.targetId,
@@ -147,6 +174,9 @@ class TinyFishCdp {
     await this.sendRaw("Page.enable", {}, this.targetSessionId);
     await this.sendRaw("Runtime.enable", {}, this.targetSessionId);
     await this.sendRaw("DOM.enable", {}, this.targetSessionId);
+    await this.sendRaw("Fetch.enable", {
+      patterns: [{ resourceType: "Document", requestStage: "Request" }],
+    }, this.targetSessionId);
     const layout = await this.sendRaw("Page.getLayoutMetrics", {}, this.targetSessionId);
     const visual = layout.cssVisualViewport as { clientWidth?: number; clientHeight?: number } | undefined;
     this.viewport = {
@@ -191,6 +221,20 @@ class TinyFishCdp {
         void this.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => undefined);
       }
     }
+    if (message.method === "Fetch.requestPaused") {
+      const params = message.params ?? {};
+      const requestId = params.requestId;
+      const request = params.request as { url?: unknown } | undefined;
+      if (typeof requestId === "string" && typeof request?.url === "string") {
+        void isAllowedNavigation(request.url, this.allowedDomain)
+          .then((allowed) => this.sendRaw(
+            allowed ? "Fetch.continueRequest" : "Fetch.failRequest",
+            allowed ? { requestId } : { requestId, errorReason: "BlockedByClient" },
+            this.targetSessionId,
+          ))
+          .catch(() => this.sendRaw("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" }, this.targetSessionId).catch(() => undefined));
+      }
+    }
     if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
     if (!pending) return;
@@ -218,6 +262,11 @@ class TinyFishCdp {
   }
 
   async navigate(url: string): Promise<void> {
+    if (!await isAllowedNavigation(url, this.allowedDomain)) {
+      throw new Error(this.allowedDomain === "*"
+        ? "Use a public HTTP or HTTPS website. Localhost, private IPs, and internal addresses are blocked."
+        : `Navigation is restricted to the verified official domain ${this.allowedDomain}.`);
+    }
     await this.send("Page.navigate", { url });
   }
 
@@ -369,10 +418,19 @@ class TinyFishCdp {
 }
 
 function connectionFor(record: BrowserSessionRecord): TinyFishCdp {
+  const navigationDomain = record.isTestMode ? "*" : record.allowedDomain ?? "";
   const current = connectionCache.get(record.id);
-  if (current) return current;
+  if (current?.allowedDomain === navigationDomain) return current;
+  if (current) {
+    // Development sessions created before the open-public-site setting was
+    // enabled can remain in the process cache after a hot reload. Reconnect
+    // to the same persisted TinyFish session with the updated navigation
+    // policy instead of keeping the old demo-domain-only guard.
+    current.close();
+    connectionCache.delete(record.id);
+  }
   const secret = decryptConnection(record.encryptedConnection);
-  const connection = new TinyFishCdp(secret.cdpUrl);
+  const connection = new TinyFishCdp(secret.cdpUrl, navigationDomain);
   connectionCache.set(record.id, connection);
   return connection;
 }
@@ -386,6 +444,12 @@ function publicState(record: BrowserSessionRecord): Omit<SharedBrowserSnapshot, 
     currentUrl: record.currentUrl,
     pageTitle: record.pageTitle,
     lastActivity: record.lastActivity,
+    actionId: record.actionId,
+    institution: record.institution,
+    selectedUrl: record.selectedUrl ? safeDisplayUrl(record.selectedUrl) : null,
+    selectionSource: record.selectionSource,
+    selectionReason: record.selectionReason,
+    isTestMode: record.isTestMode,
   };
 }
 
@@ -398,9 +462,26 @@ async function waitForCreatedSession(caseId: string): Promise<BrowserSessionReco
   return prisma.sharedBrowserSession.findFirst({ where: { caseId, activeLock: caseId } }) as Promise<BrowserSessionRecord | null>;
 }
 
-export async function startOrReconnectSharedBrowser(caseId: string): Promise<SharedBrowserSnapshot> {
+export async function startOrReconnectSharedBrowser(caseId: string, options: { institution?: string; testMode?: boolean; developmentUrl?: string } = {}): Promise<SharedBrowserSnapshot> {
+  const testMode = options.testMode === true;
+  if (testMode && (process.env.NODE_ENV === "production" || process.env.TRESTLE_BROWSER_TEST_MODE !== "true")) {
+    throw new Error("The harmless browser test site is disabled. Set TRESTLE_BROWSER_TEST_MODE=true in local development to enable it.");
+  }
+  const developmentMode = options.developmentUrl !== undefined;
+  if (developmentMode && process.env.NODE_ENV === "production") {
+    throw new Error("Custom website browsing is available only in local development.");
+  }
   const existing = await prisma.sharedBrowserSession.findFirst({ where: { caseId, activeLock: caseId } }) as BrowserSessionRecord | null;
   if (existing) {
+    if (existing.isTestMode !== testMode) {
+      throw new Error("An existing browser session belongs to a different mode. End that session before opening the case website or the explicit development test site.");
+    }
+    if ((existing.selectionSource === "development_custom_url") !== developmentMode) {
+      throw new Error("An existing browser session belongs to a different navigation mode. End that session before changing modes.");
+    }
+    if (!existing.allowedDomain || !existing.selectedUrl) {
+      throw new Error("This older browser session has no verified case website selection. End it, then start a new case-aware session.");
+    }
     if (existing.status === "connecting") {
       const created = await waitForCreatedSession(caseId);
       if (!created || created.status !== "active") throw new Error("The shared browser is still connecting. Wait a moment and retry.");
@@ -425,6 +506,38 @@ export async function startOrReconnectSharedBrowser(caseId: string): Promise<Sha
     }
     throw new Error("The existing remote session is disconnected. It was not replaced automatically; explicitly start a new demo session after reviewing the old run.");
   }
+  let selection: WebsiteSelection;
+  if (testMode) {
+    selection = {
+      actionId: "browser-development-test",
+      actionTitle: "Browser interaction test",
+      url: demoUrl,
+      allowedDomain: "*",
+      institution: null,
+      source: "explicit_test_mode",
+      reason: "Explicit development test mode. This site is unrelated to the case and is never selected for normal case work.",
+    };
+  } else if (developmentMode) {
+    const url = await isSafeDevelopmentUrl(options.developmentUrl ?? "");
+    if (!url) throw new Error("Enter a public HTTP or HTTPS website. Localhost, private IPs, and internal addresses are blocked.");
+    selection = {
+      actionId: "development-custom-website",
+      actionTitle: "Development website check",
+      url: url.toString(),
+      allowedDomain: "*",
+      institution: null,
+      source: "development_custom_url",
+      reason: "This URL was entered manually in local development. It is user-selected and is not evidence of an official source or completion.",
+    };
+  } else {
+    const { getCase } = await import("./repository");
+    const caseItem = await getCase(caseId);
+    if (!caseItem) throw new Error("Case not found.");
+    const resolution = resolveCaseWebsite({ caseItem, institution: options.institution });
+    if (resolution.kind !== "selected") throw new Error(resolution.message);
+    selection = resolution.selection;
+  }
+
   const key = apiKey();
   if (!key) throw new Error("Set TINYFISH_API_KEY in the server environment to start the shared browser.");
 
@@ -438,7 +551,14 @@ export async function startOrReconnectSharedBrowser(caseId: string): Promise<Sha
         providerSessionId: `pending-${localId}`,
         encryptedConnection: "pending",
         status: "connecting",
-        controlOwner: "agent",
+        controlOwner: testMode ? "agent" : "user",
+        selectedUrl: selection.url,
+        selectionSource: selection.source,
+        selectionReason: selection.reason,
+        actionId: selection.actionId,
+        institution: selection.institution,
+        allowedDomain: selection.allowedDomain,
+        isTestMode: testMode,
         activeLock: caseId,
       },
     }) as BrowserSessionRecord;
@@ -453,7 +573,7 @@ export async function startOrReconnectSharedBrowser(caseId: string): Promise<Sha
     const response = await fetch(browserApiEndpoint, {
       method: "POST",
       headers: { "content-type": "application/json", "X-API-Key": key },
-      body: JSON.stringify({ url: demoUrl, timeout_seconds: demoTimeoutSeconds }),
+      body: JSON.stringify({ timeout_seconds: demoTimeoutSeconds }),
     });
     const body = await response.json().catch(() => null) as Record<string, unknown> | null;
     if (!response.ok) throw new Error(`TinyFish Browser API rejected session creation (HTTP ${response.status}).`);
@@ -475,10 +595,11 @@ export async function startOrReconnectSharedBrowser(caseId: string): Promise<Sha
       },
     }) as BrowserSessionRecord;
     const cdp = connectionFor(row);
+    await cdp.navigate(selection.url);
     const metadata = await cdp.metadata();
     row = await prisma.sharedBrowserSession.update({
       where: { id: localId },
-      data: { currentUrl: metadata.currentUrl, pageTitle: metadata.pageTitle },
+      data: { currentUrl: metadata.currentUrl, pageTitle: metadata.pageTitle, lastActivity: new Date().toISOString() },
     }) as BrowserSessionRecord;
     return { ...publicState(row), screenshot: null, viewport: cdp.viewportSize() };
   } catch (error) {
@@ -585,12 +706,7 @@ export async function runSharedBrowserUserCommand(
     } else if (command.type === "scroll") {
       await cdp.scroll(Math.max(-1200, Math.min(1200, command.deltaY)));
     } else {
-      const url = new URL(command.url);
-      if (url.protocol !== "https:" || url.username || url.password) throw new Error("Use a public HTTPS address without embedded credentials.");
-      if (url.hostname.toLowerCase() !== "the-internet.herokuapp.com") {
-        throw new Error("This proof of concept is restricted to the public harmless test site at the-internet.herokuapp.com.");
-      }
-      await cdp.navigate(url.toString());
+      await cdp.navigate(command.url);
     }
   }, command.type === "navigate");
   const updated = await prisma.sharedBrowserSession.findUnique({ where: { id: row.id } }) as BrowserSessionRecord;
@@ -600,6 +716,54 @@ export async function runSharedBrowserUserCommand(
     status: updated.status,
   });
   return { ...publicState(updated), viewport: connectionFor(updated).viewportSize() };
+}
+
+/** Refresh a bank/site selection after official domains or support URLs change,
+ * keeping the same remote browser session and its user-control state. */
+export async function refreshSharedBrowserOfficialSite(caseId: string): Promise<SharedBrowserSnapshot> {
+  const row = await prisma.sharedBrowserSession.findFirst({ where: { caseId, activeLock: caseId, status: "active" } }) as BrowserSessionRecord | null;
+  if (!row) throw new Error("There is no active shared browser session.");
+  if (row.isTestMode || row.selectionSource === "development_custom_url") {
+    throw new Error("Refresh the official case destination only from a case browser session.");
+  }
+  if (row.controlOwner !== "user") throw new Error("Take control of the browser before refreshing its official destination.");
+  const claimed = await prisma.sharedBrowserSession.updateMany({
+    where: { id: row.id, status: "active", controlOwner: "user", commandClaimed: false },
+    data: { commandClaimed: true },
+  });
+  if (claimed.count !== 1) throw new Error("The browser is busy or control changed. Wait briefly and try again.");
+  try {
+    const { getCase } = await import("./repository");
+    const caseItem = await getCase(caseId);
+    if (!caseItem) throw new Error("Case not found.");
+    const resolution = resolveCaseWebsite({ caseItem, institution: row.institution ?? undefined });
+    if (resolution.kind !== "selected") throw new Error(resolution.message);
+
+    connectionCache.get(row.id)?.close();
+    connectionCache.delete(row.id);
+    const updated = await prisma.sharedBrowserSession.update({
+      where: { id: row.id },
+      data: {
+        selectedUrl: resolution.selection.url,
+        selectionSource: resolution.selection.source,
+        selectionReason: resolution.selection.reason,
+        actionId: resolution.selection.actionId,
+        institution: resolution.selection.institution,
+        allowedDomain: resolution.selection.allowedDomain,
+        lastActivity: new Date().toISOString(),
+      },
+    }) as BrowserSessionRecord;
+    const cdp = connectionFor(updated);
+    await cdp.navigate(resolution.selection.url);
+    const metadata = await cdp.metadata();
+    const finalRecord = await prisma.sharedBrowserSession.update({
+      where: { id: row.id },
+      data: { currentUrl: metadata.currentUrl, pageTitle: metadata.pageTitle, lastActivity: new Date().toISOString() },
+    }) as BrowserSessionRecord;
+    return { ...publicState(finalRecord), screenshot: null, viewport: cdp.viewportSize() };
+  } finally {
+    await releaseCommand(row.id);
+  }
 }
 
 export async function getSharedBrowserFrame(caseId: string): Promise<{ bytes: Buffer; width: number; height: number } | null> {
@@ -629,7 +793,18 @@ export async function continueSharedBrowserWithAgent(caseId: string): Promise<{ 
   if (claimed.count !== 1) throw new Error("Take control in the browser before returning it to the agent.");
   let message: string;
   try {
-    message = await connectionFor(row).continueDemo();
+    if (!row.isTestMode) {
+      await prisma.sharedBrowserSession.update({ where: { id: row.id }, data: { controlOwner: "paused", lastActivity: new Date().toISOString() } });
+      message = "Control handoff recorded. This TRESTLE version does not automate actions in this case browser; continue with the workflow manually. Authentication and consequential steps remain yours.";
+    } else {
+      const current = await connectionFor(row).metadata();
+      if (current.currentUrl !== `${demoUrl}inputs`) {
+        await prisma.sharedBrowserSession.update({ where: { id: row.id }, data: { controlOwner: "paused", lastActivity: new Date().toISOString() } });
+        message = "Control handoff recorded. The fixed test interaction only runs on the harmless number-input test page; no agent automation ran on this website.";
+      } else {
+        message = await connectionFor(row).continueDemo();
+      }
+    }
     const metadata = await connectionFor(row).metadata();
     await prisma.sharedBrowserSession.update({
       where: { id: row.id },

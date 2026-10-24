@@ -514,7 +514,7 @@ export default function WorkflowRunPanel({
           </aside>
         </div>
       )}
-      <SharedBrowserPanel caseId={caseId} />
+      <SharedBrowserPanel caseId={caseId} actions={actions} />
     </section>
   );
 }

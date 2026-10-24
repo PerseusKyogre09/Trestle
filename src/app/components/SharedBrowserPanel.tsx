@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type WheelEvent } from "react";
+import type { Action } from "../../domain/types";
 
 // Live remote screenshots must be rendered as received, without Next image optimization.
 /* eslint-disable @next/next/no-img-element */
@@ -16,16 +17,23 @@ type Session = {
   screenshot: string | null;
   viewport: { width: number; height: number } | null;
   notice?: string;
+  actionId?: string | null;
+  institution?: string | null;
+  selectedUrl?: string | null;
+  selectionSource?: string | null;
+  selectionReason?: string | null;
+  isTestMode?: boolean;
 };
 
-type Props = { caseId: string };
+type Props = { caseId: string; actions: Action[] };
 
-export default function SharedBrowserPanel({ caseId }: Props) {
+export default function SharedBrowserPanel({ caseId, actions }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [agentMessage, setAgentMessage] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
+  const [institution, setInstitution] = useState("");
   const [lastUiTiming, setLastUiTiming] = useState<string | null>(null);
   const [frameVersion, setFrameVersion] = useState(0);
   const [streamedFrame, setStreamedFrame] = useState<string | null>(null);
@@ -165,12 +173,12 @@ export default function SharedBrowserPanel({ caseId }: Props) {
   }
 
   return (
-    <section className="mt-5 rounded-xl border border-cyan-800/70 bg-slate-950/70 p-4" aria-label="Shared TinyFish browser proof of concept">
+    <section className="mt-5 rounded-xl border border-cyan-800/70 bg-slate-950/70 p-4" aria-label="Case-aware shared TinyFish browser">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Shared browser · proof of concept</p>
-          <h3 className="mt-1 text-base font-semibold text-slate-100">You and the agent use the same remote page</h3>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-400">TinyFish Browser API hosts the session; TRESTLE’s server-side Playwright connection sends the demo agent and your controls to that same tab. Use only harmless test values here. This isolated demo does not submit forms.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Case-aware shared browser</p>
+          <h3 className="mt-1 text-base font-semibold text-slate-100">Open the verified site for this workflow step</h3>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-400">TRESTLE opens a persisted official research source or a verified public institution support page. You control the shared page. Account access and consequential actions stay with you; loading a page never means the task was completed.</p>
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase ${session?.controlOwner === "user" ? "border-amber-700 bg-amber-950/40 text-amber-200" : session?.controlOwner === "agent" ? "border-cyan-700 bg-cyan-950/40 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-300"}`}>
           {session?.status === "active" ? `${session.controlOwner} has control` : session?.status ?? "not started"}
@@ -178,13 +186,29 @@ export default function SharedBrowserPanel({ caseId }: Props) {
       </div>
 
       {!session || ["failed", "expired", "closed"].includes(session.status)
-        ? <button type="button" disabled={busy} onClick={() => void command({ action: "start" })} className="mt-4 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Connecting…" : session?.status === "expired" ? "Start a new test session" : "Start shared browser demo"}</button>
+        ? <div className="mt-4 space-y-3">
+          <label className="block max-w-lg text-xs text-slate-300" htmlFor={`browser-institution-${caseId}`}>Institution or bank, if relevant <span className="text-slate-500">(name only; no account/card details)</span>
+            <input id={`browser-institution-${caseId}`} value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="For example, ICICI Bank" className="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => void command({ action: "start", institution })} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Opening verified case website…" : session?.status === "expired" ? "Open case website in a new session" : "Open case website"}</button>
+            <button type="button" disabled={busy} onClick={() => void command({ action: "start", testMode: true })} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 disabled:opacity-50">Development test site</button>
+          </div>
+          <p className="text-xs text-slate-500">The development test site works only when the server has TRESTLE_BROWSER_TEST_MODE=true. It is never selected for a case.</p>
+        </div>
         : session.status === "disconnected"
         ? <button type="button" disabled={busy} onClick={() => void command({ action: "start" })} className="mt-4 rounded-lg border border-amber-700 px-4 py-2 text-sm text-amber-100 disabled:opacity-50">{busy ? "Reconnecting…" : "Reconnect to this session"}</button>
         : session.status === "connecting"
         ? <p className="mt-4 rounded-lg border border-slate-800 p-3 text-sm text-slate-300">Connecting to the existing TinyFish session…</p>
         : (
           <>
+            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-sm">
+              <p className="font-medium text-slate-100">Current workflow step: {actions.find((action) => action.id === session.actionId)?.title ?? session.actionId ?? "Unavailable"}</p>
+              {session.institution && <p className="mt-1 text-slate-300">Institution: {session.institution}</p>}
+              <p className="mt-1 break-all text-xs text-cyan-200">Selected URL: {session.selectedUrl ?? "Unavailable"}</p>
+              <p className="mt-1 text-xs text-slate-400">Selection: {session.selectionSource ?? "unknown"}. {session.selectionReason ?? "No selection explanation is available."}</p>
+              {session.selectedUrl && <a href={session.selectedUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold text-cyan-300 underline underline-offset-2">Open selected page in my browser</a>}
+            </div>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <p className="mr-auto min-w-0 text-xs text-slate-400">{session.pageTitle || "Page title unavailable"} · <span className="break-all">{session.currentUrl || "URL unavailable"}</span></p>
               {session.controlOwner === "agent"
@@ -193,10 +217,12 @@ export default function SharedBrowserPanel({ caseId }: Props) {
                   <button type="button" disabled={busy} onClick={() => void command({ action: "pause-agent" })} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-50">Pause agent</button>
                 </>
                 : session.controlOwner === "user"
-                ? <button type="button" disabled={busy} onClick={() => void command({ action: "return-to-agent" })} className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Agent checking the page…" : "Return to agent · continue"}</button>
+                ? <button type="button" disabled={busy} onClick={() => void command({ action: "return-to-agent" })} className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Handing back…" : "Finish user step · hand back"}</button>
                 : <>
                   <button type="button" disabled={busy} onClick={() => void command({ action: "take-control" })} className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Take control</button>
-                  <button type="button" disabled={busy} onClick={() => void command({ action: "return-to-agent" })} className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Resume agent · continue</button>
+                  {session.isTestMode
+                    ? <button type="button" disabled={busy} onClick={() => void command({ action: "return-to-agent" })} className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Resume test agent</button>
+                    : <span className="text-xs text-slate-400">Paused. TRESTLE will not automate actions on this site.</span>}
                 </>}
               <button
                 type="button"
@@ -207,12 +233,22 @@ export default function SharedBrowserPanel({ caseId }: Props) {
                 End remote session
               </button>
             </div>
+            {session.status === "active" && !session.currentUrl && session.selectionSource !== "explicit_test_mode" && (
+              <p role="status" className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-100">
+                The remote browser has not confirmed a web page URL. If the viewport shows a Chromium network error, navigation did not succeed and this does not complete the workflow step. Use the verified page link above to continue in your browser, or refresh the official destination.
+              </p>
+            )}
             {session.controlOwner === "user" && (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+              {!session.isTestMode && session.selectionSource !== "development_custom_url" && (
+                <button type="button" disabled={busy} onClick={() => void command({ action: "refresh-official-site" })} className="rounded-lg border border-cyan-800 px-3 py-2 text-xs font-semibold text-cyan-200 disabled:opacity-50">Refresh verified official destination</button>
+              )}
               <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); void command({ action: "navigate", url: urlDraft }); }}>
                 <label htmlFor={`shared-browser-url-${caseId}`} className="sr-only">Navigate the shared browser</label>
                 <input id={`shared-browser-url-${caseId}`} value={urlDraft} onChange={(event) => setUrlDraft(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200" />
                 <button type="submit" disabled={busy} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-50">Go</button>
               </form>
+              </div>
             )}
             <div
               ref={viewportRef}
@@ -252,8 +288,8 @@ export default function SharedBrowserPanel({ caseId }: Props) {
             </div>
             <p className="mt-2 text-xs text-slate-500">
               {session.controlOwner === "user"
-                ? "Click the real page, then type. Scroll over the page to scroll the remote browser. Navigation is restricted to the harmless test site."
-                : "Take control to click, type, scroll, or navigate. The agent cannot act while you control the session."}
+                ? `Click the real page, then type or scroll. Navigation is restricted to ${session.isTestMode || session.selectionSource === "development_custom_url" ? "public HTTP/HTTPS websites; localhost, private IPs, and internal destinations are blocked" : session.selectedUrl ? new URL(session.selectedUrl).hostname : "the verified official domain"}. Do not enter passwords, card details, or OTPs into TRESTLE.`
+                : "The page is not currently under your control. The browser view is real; no automated action is claimed for this case step."}
             </p>
             <p className="mt-1 text-[11px] text-cyan-300">Live CDP frame stream: {session.status === "active" ? streamState : "disconnected"}</p>
             {session.lastActivity && (
@@ -271,7 +307,7 @@ export default function SharedBrowserPanel({ caseId }: Props) {
           </>
         )}
       {error && <p role="alert" className="mt-3 rounded-lg border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">{error}</p>}
-      <p className="mt-3 text-[11px] leading-5 text-slate-600">This proof of concept uses a billable TinyFish Browser API session, isolated to this case. The CDP URL and API key remain server-side. It is local-development-only because TRESTLE has no user authentication.</p>
+      <p className="mt-3 text-[11px] leading-5 text-slate-600">This uses a billable TinyFish Browser API session. The CDP URL and API key remain server-side. Local-development-only: TRESTLE has no user authentication. Research and page navigation do not block cards, submit forms, or verify account changes.</p>
     </section>
   );
 }
