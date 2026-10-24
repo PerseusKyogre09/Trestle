@@ -58,7 +58,6 @@ export const transitionSchema = z.object({
   evidence: evidenceSchema.optional(),
   note: z.string().optional(),
 });
-
 export const approvalStatusSchema = z.enum(approvalStatuses);
 export const riskCategorySchema = z.enum(riskCategories);
 export const executionStatusSchema = z.enum(executionStatuses);
