@@ -49,7 +49,7 @@ const HIGH_CONSEQUENCE_OPERATIONS = new Set([
  */
 export function classifyOperation(
   action: Action,
-  operation?: ProposedOperation
+  operation?: ProposedOperation,
 ): { category: RiskCategory; prohibitsAutomation: boolean; reason: string } {
   // 1. Explicit check: does the destination service prohibit automation or require personal action?
   if (operation?.prohibitsAutomation) {
@@ -125,7 +125,7 @@ export function classifyOperation(
  */
 export function evaluatePolicy(
   action: Action,
-  operation?: ProposedOperation
+  operation?: ProposedOperation,
 ): PolicyEvaluation {
   const classification = classifyOperation(action, operation);
   const reasons: string[] = [classification.reason];

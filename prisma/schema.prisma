@@ -48,6 +48,7 @@ model Approval {
   caseId               String
   actionId             String
   status               String             @default("pending")
+  operationType        String             @default("")
   operationDescription String
   destination          String?
   payload              String

@@ -12,10 +12,14 @@ export async function PATCH(
   const action = item?.actions.find((a) => a.id === actionId);
 
   if (!item || !action) {
-    return NextResponse.json({ error: "Action not found in this case." }, { status: 404 });
+    return NextResponse.json({ error: "Action not found in this case." }, {
+      status: 404,
+    });
   }
 
-  const body = transitionSchema.safeParse(await request.json().catch(() => null));
+  const body = transitionSchema.safeParse(
+    await request.json().catch(() => null),
+  );
   if (!body.success) {
     return NextResponse.json(
       { error: body.error.issues[0]?.message ?? "Invalid request." },
@@ -50,7 +54,11 @@ export async function PATCH(
 
   try {
     assertTransition(action.status, body.data.status, body.data.evidence);
-    const updated = await updateAction(actionId, body.data.status, body.data.evidence);
+    const updated = await updateAction(
+      actionId,
+      body.data.status,
+      body.data.evidence,
+    );
     return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json(

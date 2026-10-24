@@ -1,8 +1,14 @@
 import { assertTransition } from "../../domain/engine";
-import type { Action, Evidence, ExecutionStatus, ProposedOperation } from "../../domain/types";
+import type {
+  Action,
+  Evidence,
+  ExecutionStatus,
+  ProposedOperation,
+} from "../../domain/types";
 import { verifyApprovalForExecution } from "../approvalService";
 import { evaluatePolicy } from "../policy";
 import {
+  claimActionForExecution,
   createExecutionAttempt,
   getCase,
   updateAction,
@@ -18,7 +24,11 @@ export class ExecutionControllerError extends Error {
   }
 }
 
-export type ExecutionOutcome = "verified" | "unverified" | "uncertain" | "failed";
+export type ExecutionOutcome =
+  | "verified"
+  | "unverified"
+  | "uncertain"
+  | "failed";
 
 export interface ExecutionControllerResult {
   attemptId: string;
@@ -48,13 +58,13 @@ export class ExecutionController {
     options: {
       operation?: ProposedOperation;
       providerName?: string;
-    } = {}
+    } = {},
   ): Promise<ExecutionControllerResult> {
     // 1. Prevent duplicate concurrent execution
     if (activeExecutionLocks.has(actionId)) {
       throw new ExecutionControllerError(
         "An execution attempt is already in progress for this action.",
-        409
+        409,
       );
     }
     activeExecutionLocks.add(actionId);
@@ -68,7 +78,10 @@ export class ExecutionController {
 
       const action = caseItem.actions.find((a) => a.id === actionId);
       if (!action) {
-        throw new ExecutionControllerError("Action not found in this case.", 404);
+        throw new ExecutionControllerError(
+          "Action not found in this case.",
+          404,
+        );
       }
 
       // 3. Workflow engine eligibility check: dependencies
@@ -79,21 +92,32 @@ export class ExecutionController {
 
       if (blockedBy.length > 0) {
         throw new ExecutionControllerError(
-          `This action is blocked by incomplete prerequisites: ${blockedBy.join(", ")}.`,
-          409
+          `This action is blocked by incomplete prerequisites: ${
+            blockedBy.join(", ")
+          }.`,
+          409,
         );
       }
 
       if (action.status === "completed") {
         throw new ExecutionControllerError(
           "Action has already been completed.",
-          409
+          409,
+        );
+      }
+
+      if (action.status === "in_progress") {
+        throw new ExecutionControllerError(
+          "Action already has an execution in progress or requires manual reconciliation.",
+          409,
         );
       }
 
       // 4. Construct proposed operation if not provided
       const operation: ProposedOperation = options.operation ?? {
-        operationType: action.approvalRequired ? "review_action" : "read_public_info",
+        operationType: action.approvalRequired
+          ? "review_action"
+          : "read_public_info",
         description: action.description,
         destination: undefined,
         payload: { actionId: action.id, title: action.title },
@@ -116,7 +140,7 @@ export class ExecutionController {
 
         throw new ExecutionControllerError(
           "This service prohibits automation or requires personal user action. Automated execution is blocked.",
-          400
+          400,
         );
       }
 
@@ -126,30 +150,27 @@ export class ExecutionController {
         const verification = await verifyApprovalForExecution(
           caseId,
           actionId,
-          operation.payload
+          operation,
         );
 
         if (!verification.valid) {
           throw new ExecutionControllerError(
             `Execution requires valid approval: ${verification.reason}`,
-            403
+            403,
           );
         }
 
         approvalId = verification.approval?.id;
       }
 
-      // 7. Transition workflow state to in_progress if currently ready or awaiting_approval
-      if (action.status === "ready" || action.status === "awaiting_approval") {
-        try {
-          assertTransition(action.status, "in_progress");
-          await updateAction(actionId, "in_progress");
-        } catch (error) {
-          throw new ExecutionControllerError(
-            error instanceof Error ? error.message : "Invalid transition to in_progress.",
-            409
-          );
-        }
+      // 7. Atomically claim the action immediately before provider work. The
+      // in-memory lock helps within one process; this conditional update also
+      // prevents duplicate execution across multiple application instances.
+      if (!(await claimActionForExecution(caseId, actionId))) {
+        throw new ExecutionControllerError(
+          "The action is no longer eligible for execution.",
+          409,
+        );
       }
 
       // 8. Select provider and check eligibility
@@ -171,10 +192,11 @@ export class ExecutionController {
           status: "failed",
           resultSummary: `Provider rejected execution: ${eligibility.reason}`,
         });
+        await updateAction(actionId, "failed");
 
         throw new ExecutionControllerError(
           `Execution provider rejected operation: ${eligibility.reason}`,
-          400
+          400,
         );
       }
 
@@ -193,7 +215,9 @@ export class ExecutionController {
       try {
         providerResult = await provider.execute(executionContext);
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : "Provider runtime error";
+        const errMsg = err instanceof Error
+          ? err.message
+          : "Provider runtime error";
         await updateExecutionAttempt(attempt.id, {
           status: "failed",
           finishedAt: new Date(),
@@ -210,7 +234,7 @@ export class ExecutionController {
         action,
         operation,
         providerResult,
-        policy.reasons
+        policy.reasons,
       );
     } finally {
       activeExecutionLocks.delete(actionId);
@@ -227,7 +251,7 @@ export class ExecutionController {
     action: Action,
     operation: ProposedOperation,
     providerResult: ProviderExecutionResult,
-    policyReasons: string[]
+    policyReasons: string[],
   ): Promise<ExecutionControllerResult> {
     const now = new Date();
 
@@ -294,12 +318,16 @@ export class ExecutionController {
       operation.operationType === "click_element" ||
       operation.payload.isIntermediateStep === true;
 
-    if (isIntermediateOnly || !providerResult.canVerifyOutcome || !providerResult.evidence) {
+    if (
+      isIntermediateOnly || !providerResult.canVerifyOutcome ||
+      !providerResult.evidence
+    ) {
       // Operation succeeded at the provider, but cannot verify complete action satisfaction yet
       await updateExecutionAttempt(attemptId, {
         status: "succeeded",
         finishedAt: now,
-        resultSummary: `${providerResult.resultSummary} (Outcome unverified against final action completion criteria)`,
+        resultSummary:
+          `${providerResult.resultSummary} (Outcome unverified against final action completion criteria)`,
         resultDetails: JSON.stringify(providerResult.details ?? {}),
         evidence: providerResult.evidence ?? null,
       });
@@ -313,7 +341,8 @@ export class ExecutionController {
         outcome: "unverified",
         provider: providerResult.providerName,
         isSimulated: providerResult.isSimulated,
-        resultSummary: `${providerResult.resultSummary} (Intermediate step complete; final outcome unverified)`,
+        resultSummary:
+          `${providerResult.resultSummary} (Intermediate step complete; final outcome unverified)`,
         evidence: providerResult.evidence ?? null,
         policyReasons,
       };

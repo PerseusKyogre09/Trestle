@@ -8,7 +8,7 @@ import {
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string; approvalId: string }> }
+  { params }: { params: Promise<{ id: string; approvalId: string }> },
 ) {
   const { id, approvalId } = await params;
   const rawJson = await request.json().catch(() => null);
@@ -17,7 +17,7 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid decision payload." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -37,11 +37,17 @@ export async function POST(
     }
   } catch (error) {
     if (error instanceof ApprovalError) {
-      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, {
+        status: error.statusCode,
+      });
     }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to record approval decision." },
-      { status: 500 }
+      {
+        error: error instanceof Error
+          ? error.message
+          : "Failed to record approval decision.",
+      },
+      { status: 500 },
     );
   }
 }

@@ -54,7 +54,7 @@ export const createCaseSchema = z.object({
 });
 
 export const transitionSchema = z.object({
-  status: z.enum(["in_progress", "completed", "failed", "awaiting_approval", "ready"]),
+  status: z.enum(["in_progress", "completed", "failed"]),
   evidence: evidenceSchema.optional(),
   note: z.string().optional(),
 });

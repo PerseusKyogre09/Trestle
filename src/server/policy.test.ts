@@ -23,7 +23,10 @@ const createMockAction = (overrides: Partial<Action> = {}): Action => ({
 
 describe("Risk and Permission Policy", () => {
   it("classifies low risk operations correctly and permits automatic execution", () => {
-    const action = createMockAction({ riskLevel: "low", approvalRequired: false });
+    const action = createMockAction({
+      riskLevel: "low",
+      approvalRequired: false,
+    });
     const op: ProposedOperation = {
       operationType: "read_public_info",
       description: "Read official documentation",
@@ -82,12 +85,17 @@ describe("Risk and Permission Policy", () => {
     expect(evaluation.prohibitsAutomation).toBe(true);
     expect(evaluation.canExecuteAutomatically).toBe(false);
     expect(evaluation.reasons).toEqual(
-      expect.arrayContaining([expect.stringContaining("Automation is prohibited")])
+      expect.arrayContaining([
+        expect.stringContaining("Automation is prohibited"),
+      ]),
     );
   });
 
   it("requires approval if action has approvalRequired set even with generic operation", () => {
-    const action = createMockAction({ approvalRequired: true, riskLevel: "medium" });
+    const action = createMockAction({
+      approvalRequired: true,
+      riskLevel: "medium",
+    });
     const evaluation = evaluatePolicy(action);
     expect(evaluation.requiresApproval).toBe(true);
     expect(evaluation.canExecuteAutomatically).toBe(false);

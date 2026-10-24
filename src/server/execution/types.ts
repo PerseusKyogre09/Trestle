@@ -1,4 +1,8 @@
-import type { Evidence, ExecutionStatus, ProposedOperation } from "../../domain/types";
+import type {
+  Evidence,
+  ExecutionStatus,
+  ProposedOperation,
+} from "../../domain/types";
 
 export interface ExecutionContext {
   caseId: string;

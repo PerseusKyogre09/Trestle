@@ -13,7 +13,10 @@ export function canonicalizeJson(obj: unknown): string {
   }
   const keys = Object.keys(obj as Record<string, unknown>).sort();
   const pairs = keys.map(
-    (key) => `${JSON.stringify(key)}:${canonicalizeJson((obj as Record<string, unknown>)[key])}`
+    (key) =>
+      `${JSON.stringify(key)}:${
+        canonicalizeJson((obj as Record<string, unknown>)[key])
+      }`,
   );
   return "{" + pairs.join(",") + "}";
 }
@@ -24,6 +27,25 @@ export function canonicalizeJson(obj: unknown): string {
 export function hashPayload(payload: unknown): string {
   const canonical = canonicalizeJson(payload);
   return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
+/**
+ * Hashes the complete operation contract that a human approved. Payload-only
+ * hashes are insufficient because changing the operation type or destination
+ * can change the real-world consequence without changing the payload.
+ */
+export function hashOperation(operation: {
+  operationType: string;
+  description: string;
+  destination?: string;
+  payload: unknown;
+}): string {
+  return hashPayload({
+    operationType: operation.operationType,
+    description: operation.description,
+    destination: operation.destination ?? null,
+    payload: operation.payload,
+  });
 }
 
 const SENSITIVE_KEY_PATTERNS = [

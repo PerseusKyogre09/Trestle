@@ -16,9 +16,24 @@ export const evidenceKinds = [
   "user_provided",
   "verified",
 ] as const;
-export const approvalStatuses = ["pending", "approved", "rejected", "expired", "invalidated"] as const;
-export const riskCategories = ["low_risk", "requires_review", "high_consequence"] as const;
-export const executionStatuses = ["running", "succeeded", "failed", "uncertain"] as const;
+export const approvalStatuses = [
+  "pending",
+  "approved",
+  "rejected",
+  "expired",
+  "invalidated",
+] as const;
+export const riskCategories = [
+  "low_risk",
+  "requires_review",
+  "high_consequence",
+] as const;
+export const executionStatuses = [
+  "running",
+  "succeeded",
+  "failed",
+  "uncertain",
+] as const;
 
 export type CaseStatus = (typeof caseStatuses)[number];
 export type ActionStatus = (typeof actionStatuses)[number];
@@ -46,6 +61,7 @@ export type Approval = {
   actionId: string;
   status: ApprovalStatus;
   operationDescription: string;
+  operationType: string;
   destination?: string | null;
   payload: string;
   payloadHash: string;

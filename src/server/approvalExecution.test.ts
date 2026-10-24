@@ -25,15 +25,18 @@ describe("Human Approval & Action Execution Framework", () => {
     await prisma.case.deleteMany();
 
     const compiled = new RuleBasedWorkflowCompiler().compile(
-      "I lost my wallet containing my debit card and driving licence."
+      "I lost my wallet containing my debit card and driving licence.",
     );
     const created = await createCase(
       "I lost my wallet containing my debit card and driving licence.",
-      compiled.workflow!
+      compiled.workflow!,
     );
     caseId = created.id;
-    secureCardsActionId = created.actions.find((a) => a.id === "secure-cards")!.id;
-    checkTxActionId = created.actions.find((a) => a.id === "check-transactions")!.id;
+    secureCardsActionId = created.actions.find((a) =>
+      a.id === "secure-cards"
+    )!.id;
+    checkTxActionId =
+      created.actions.find((a) => a.id === "check-transactions")!.id;
   });
 
   describe("Approval Creation & Lifecycle", () => {
@@ -42,10 +45,18 @@ describe("Human Approval & Action Execution Framework", () => {
         operationType: "enter_form_details",
         description: "Populate card freeze request details",
         destination: "https://bank.example/cards/freeze",
-        payload: { issuer: "BankCorp", cardEnding: "1234", freezeType: "temporary" },
+        payload: {
+          issuer: "BankCorp",
+          cardEnding: "1234",
+          freezeType: "temporary",
+        },
       };
 
-      const approval = await requestApproval(caseId, secureCardsActionId, operation);
+      const approval = await requestApproval(
+        caseId,
+        secureCardsActionId,
+        operation,
+      );
       expect(approval.status).toBe("pending");
       expect(approval.caseId).toBe(caseId);
       expect(approval.actionId).toBe(secureCardsActionId);
@@ -57,7 +68,9 @@ describe("Human Approval & Action Execution Framework", () => {
         where: { id: caseId },
         include: { actions: true },
       });
-      const action = updatedCase?.actions.find((a: { id: string }) => a.id === secureCardsActionId);
+      const action = updatedCase?.actions.find((a: { id: string }) =>
+        a.id === secureCardsActionId
+      );
       expect(action?.status).toBe("awaiting_approval");
     });
 
@@ -75,7 +88,9 @@ describe("Human Approval & Action Execution Framework", () => {
 
       expect(approved.status).toBe("approved");
       expect(approved.decidedAt).toBeTruthy();
-      expect(approved.decisionReason).toBe("Approved after verifying card details");
+      expect(approved.decisionReason).toBe(
+        "Approved after verifying card details",
+      );
       expect(approved.decisionAudit).toContain("test-user");
     });
 
@@ -106,10 +121,10 @@ describe("Human Approval & Action Execution Framework", () => {
       await approveRequest(caseId, req.id);
 
       await expect(approveRequest(caseId, req.id)).rejects.toThrow(
-        /Cannot approve request: status is already "approved"/
+        /Cannot approve request: status is already "approved"/,
       );
       await expect(rejectRequest(caseId, req.id)).rejects.toThrow(
-        /Cannot reject request: status is already "approved"/
+        /Cannot reject request: status is already "approved"/,
       );
     });
 
@@ -120,10 +135,15 @@ describe("Human Approval & Action Execution Framework", () => {
         payload: { test: true },
       };
       // Expires immediately in negative seconds
-      const req = await requestApproval(caseId, secureCardsActionId, operation, -10);
+      const req = await requestApproval(
+        caseId,
+        secureCardsActionId,
+        operation,
+        -10,
+      );
 
       await expect(approveRequest(caseId, req.id)).rejects.toThrow(
-        /expired/i
+        /expired/i,
       );
       const fetched = await getApproval(caseId, req.id);
       expect(fetched?.status).toBe("expired");
@@ -138,7 +158,7 @@ describe("Human Approval & Action Execution Framework", () => {
       };
       const req = await requestApproval(caseId, secureCardsActionId, operation);
       await expect(approveRequest(caseId, req.id)).rejects.toThrow(
-        /prohibits automation and requires personal action/
+        /prohibits automation and requires personal action/,
       );
     });
   });
@@ -163,10 +183,10 @@ describe("Human Approval & Action Execution Framework", () => {
       expect(fetched).toBeNull();
 
       await expect(approveRequest(otherCase.id, req.id)).rejects.toThrow(
-        /Approval request not found in this case/
+        /Approval request not found in this case/,
       );
       await expect(rejectRequest(otherCase.id, req.id)).rejects.toThrow(
-        /Approval request not found in this case/
+        /Approval request not found in this case/,
       );
     });
 
@@ -184,7 +204,7 @@ describe("Human Approval & Action Execution Framework", () => {
       const checkValid = await verifyApprovalForExecution(
         caseId,
         secureCardsActionId,
-        approvedPayload
+        operation,
       );
       expect(checkValid.valid).toBe(true);
 
@@ -193,14 +213,59 @@ describe("Human Approval & Action Execution Framework", () => {
       const checkAltered = await verifyApprovalForExecution(
         caseId,
         secureCardsActionId,
-        alteredPayload
+        { ...operation, payload: alteredPayload },
       );
       expect(checkAltered.valid).toBe(false);
-      expect(checkAltered.reason).toContain("changed since approval was granted");
+      expect(checkAltered.reason).toContain(
+        "changed since approval was granted",
+      );
 
       // Verify that the approval record status is now invalidated in DB
       const updatedReq = await getApproval(caseId, req.id);
       expect(updatedReq?.status).toBe("invalidated");
+    });
+
+    it("invalidates approval when operation type or destination changes", async () => {
+      const operation = {
+        operationType: "enter_form_details",
+        description: "Populate card details",
+        destination: "https://bank.example/freeze",
+        payload: { issuer: "BankCorp" },
+      };
+      const req = await requestApproval(caseId, secureCardsActionId, operation);
+      await approveRequest(caseId, req.id);
+
+      const result = await verifyApprovalForExecution(
+        caseId,
+        secureCardsActionId,
+        {
+          ...operation,
+          operationType: "submit_application",
+          destination: "https://different.example/submit",
+        },
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain("operation changed");
+      expect((await getApproval(caseId, req.id))?.status).toBe("invalidated");
+    });
+
+    it("invalidates an older approved request when a new request is created", async () => {
+      const first = await requestApproval(caseId, secureCardsActionId, {
+        operationType: "enter_form_details",
+        description: "First operation",
+        payload: { version: 1 },
+      });
+      await approveRequest(caseId, first.id);
+
+      const second = await requestApproval(caseId, secureCardsActionId, {
+        operationType: "enter_form_details",
+        description: "Replacement operation",
+        payload: { version: 2 },
+      });
+
+      expect((await getApproval(caseId, first.id))?.status).toBe("invalidated");
+      expect((await getApproval(caseId, second.id))?.status).toBe("pending");
     });
   });
 
@@ -208,20 +273,20 @@ describe("Human Approval & Action Execution Framework", () => {
     it("blocks execution when action prerequisites are incomplete", async () => {
       // check-transactions depends on secure-cards, which is currently pending
       await expect(
-        executionController.execute(caseId, checkTxActionId)
+        executionController.execute(caseId, checkTxActionId),
       ).rejects.toThrow(/blocked by incomplete prerequisites/);
     });
 
     it("prevents execution of sensitive actions when approval is missing", async () => {
       const operation = {
-        operationType: "enter_form_details",
+        operationType: "final_action_completion",
         description: "Populate card details",
         payload: { issuer: "BankCorp" },
       };
 
       // No approval has been requested or approved yet
       await expect(
-        executionController.execute(caseId, secureCardsActionId, { operation })
+        executionController.execute(caseId, secureCardsActionId, { operation }),
       ).rejects.toThrow(/Execution requires valid approval/);
     });
 
@@ -232,10 +297,12 @@ describe("Human Approval & Action Execution Framework", () => {
         payload: { issuer: "BankCorp" },
       };
       const req = await requestApproval(caseId, secureCardsActionId, operation);
-      await rejectRequest(caseId, req.id, { reason: "User declined to proceed." });
+      await rejectRequest(caseId, req.id, {
+        reason: "User declined to proceed.",
+      });
 
       await expect(
-        executionController.execute(caseId, secureCardsActionId, { operation })
+        executionController.execute(caseId, secureCardsActionId, { operation }),
       ).rejects.toThrow(/No approved authorization found/);
     });
 
@@ -255,7 +322,7 @@ describe("Human Approval & Action Execution Framework", () => {
       });
 
       await expect(
-        executionController.execute(caseId, secureCardsActionId, { operation })
+        executionController.execute(caseId, secureCardsActionId, { operation }),
       ).rejects.toThrow(/approval for this action has expired/i);
     });
 
@@ -277,25 +344,26 @@ describe("Human Approval & Action Execution Framework", () => {
       await updateAction(checkTxActionId, "ready");
 
       await expect(
-        executionController.execute(caseId, checkTxActionId, { operation })
+        executionController.execute(caseId, checkTxActionId, { operation }),
       ).rejects.toThrow(/No approved authorization found for this action/);
     });
 
     it("executes authorised action successfully with mock provider and records verified outcome", async () => {
       const operation = {
-        operationType: "enter_form_details",
+        operationType: "final_action_completion",
         description: "Populate card details",
         payload: { issuer: "BankCorp" },
       };
       const req = await requestApproval(caseId, secureCardsActionId, operation);
       await approveRequest(caseId, req.id);
 
-      const result = await executionController.execute(caseId, secureCardsActionId, {
-        operation: {
-          ...operation,
-          operationType: "final_action_completion", // full action completion
+      const result = await executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
         },
-      });
+      );
 
       expect(result.status).toBe("succeeded");
       expect(result.outcome).toBe("verified");
@@ -321,9 +389,13 @@ describe("Human Approval & Action Execution Framework", () => {
       const req = await requestApproval(caseId, secureCardsActionId, operation);
       await approveRequest(caseId, req.id);
 
-      const result = await executionController.execute(caseId, secureCardsActionId, {
-        operation,
-      });
+      const result = await executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
+        },
+      );
 
       expect(result.status).toBe("succeeded");
       expect(result.outcome).toBe("unverified"); // Intermediate step complete, but action not completed!
@@ -344,9 +416,13 @@ describe("Human Approval & Action Execution Framework", () => {
       const req = await requestApproval(caseId, secureCardsActionId, operation);
       await approveRequest(caseId, req.id);
 
-      const result = await executionController.execute(caseId, secureCardsActionId, {
-        operation,
-      });
+      const result = await executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
+        },
+      );
 
       expect(result.status).toBe("uncertain");
       expect(result.outcome).toBe("uncertain");
@@ -374,9 +450,13 @@ describe("Human Approval & Action Execution Framework", () => {
       const req = await requestApproval(caseId, secureCardsActionId, operation);
       await approveRequest(caseId, req.id);
 
-      const result = await executionController.execute(caseId, secureCardsActionId, {
-        operation,
-      });
+      const result = await executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
+        },
+      );
 
       expect(result.status).toBe("failed");
       expect(result.outcome).toBe("failed");
@@ -396,7 +476,7 @@ describe("Human Approval & Action Execution Framework", () => {
       };
 
       await expect(
-        executionController.execute(caseId, secureCardsActionId, { operation })
+        executionController.execute(caseId, secureCardsActionId, { operation }),
       ).rejects.toThrow(/Automated execution is blocked/i);
     });
 
@@ -410,13 +490,21 @@ describe("Human Approval & Action Execution Framework", () => {
       await approveRequest(caseId, req.id);
 
       // Execute two concurrently
-      const promise1 = executionController.execute(caseId, secureCardsActionId, {
-        operation,
-      });
+      const promise1 = executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
+        },
+      );
       // The second simultaneous invocation should be rejected due to active concurrency lock
-      const promise2 = executionController.execute(caseId, secureCardsActionId, {
-        operation,
-      });
+      const promise2 = executionController.execute(
+        caseId,
+        secureCardsActionId,
+        {
+          operation,
+        },
+      );
 
       const results = await Promise.allSettled([promise1, promise2]);
       const fulfilled = results.filter((r) => r.status === "fulfilled");
@@ -424,7 +512,7 @@ describe("Human Approval & Action Execution Framework", () => {
       expect(fulfilled.length).toBe(1);
       expect(rejected.length).toBe(1);
       expect((rejected[0] as PromiseRejectedResult).reason.message).toContain(
-        "already in progress"
+        "already in progress",
       );
     });
 
@@ -436,7 +524,7 @@ describe("Human Approval & Action Execution Framework", () => {
       });
 
       await expect(
-        executionController.execute(caseId, secureCardsActionId)
+        executionController.execute(caseId, secureCardsActionId),
       ).rejects.toThrow(/already been completed/);
     });
   });

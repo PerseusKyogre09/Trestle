@@ -4,6 +4,7 @@ CREATE TABLE "Approval" (
     "caseId" TEXT NOT NULL,
     "actionId" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'pending',
+    "operationType" TEXT NOT NULL DEFAULT '',
     "operationDescription" TEXT NOT NULL,
     "destination" TEXT,
     "payload" TEXT NOT NULL,

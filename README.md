@@ -32,12 +32,17 @@ git clone <YOUR_REPOSITORY_URL>
 cd trestle
 npm install
 cp .env.example .env.local
+cp .env.example .env
 npm run db:generate
 npm run db:migrate
 npm run dev
 ```
 
 The development server is available at `http://localhost:3000`.
+
+Prisma CLI reads `.env`, while Next.js reads `.env.local`. The application and
+tests fall back to `DATABASE_URL="file:./dev.db"` when no environment file
+exists, but keeping both files makes the setup explicit.
 
 SQLite database is stored at `prisma/dev.db`. To apply new migrations or reset local data:
 - `npm run db:migrate` — creates and applies Prisma migrations.

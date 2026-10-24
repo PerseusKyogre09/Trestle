@@ -5,7 +5,7 @@ import type { ApprovalStatus } from "../../../../../domain/types";
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const caseItem = await getCase(id);
@@ -22,8 +22,12 @@ export async function GET(
     return NextResponse.json(approvals);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to retrieve approvals." },
-      { status: 500 }
+      {
+        error: error instanceof Error
+          ? error.message
+          : "Failed to retrieve approvals.",
+      },
+      { status: 500 },
     );
   }
 }

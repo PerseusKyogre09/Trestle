@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { requestApprovalSchema } from "../../../../../../../domain/validation";
-import { ApprovalError, requestApproval } from "../../../../../../../server/approvalService";
+import {
+  ApprovalError,
+  requestApproval,
+} from "../../../../../../../server/approvalService";
 import { getCase } from "../../../../../../../server/repository";
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string; actionId: string }> }
+  { params }: { params: Promise<{ id: string; actionId: string }> },
 ) {
   const { id, actionId } = await params;
   const caseItem = await getCase(id);
@@ -15,7 +18,9 @@ export async function POST(
 
   const action = caseItem.actions.find((a) => a.id === actionId);
   if (!action) {
-    return NextResponse.json({ error: "Action not found in this case." }, { status: 404 });
+    return NextResponse.json({ error: "Action not found in this case." }, {
+      status: 404,
+    });
   }
 
   const rawJson = await request.json().catch(() => null);
@@ -24,7 +29,7 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid approval request." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -33,16 +38,22 @@ export async function POST(
       id,
       actionId,
       parsed.data.operation,
-      parsed.data.expiresInSeconds
+      parsed.data.expiresInSeconds,
     );
     return NextResponse.json(approval, { status: 201 });
   } catch (error) {
     if (error instanceof ApprovalError) {
-      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, {
+        status: error.statusCode,
+      });
     }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create approval request." },
-      { status: 500 }
+      {
+        error: error instanceof Error
+          ? error.message
+          : "Failed to create approval request.",
+      },
+      { status: 500 },
     );
   }
 }

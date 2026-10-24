@@ -13,19 +13,23 @@ import type {
 export class MockExecutionProvider implements ExecutionProvider {
   public readonly name = "mock-provider";
 
-  async checkEligibility(context: ExecutionContext): Promise<EligibilityResult> {
+  async checkEligibility(
+    context: ExecutionContext,
+  ): Promise<EligibilityResult> {
     if (context.operation.prohibitsAutomation) {
       return {
         eligible: false,
         supportsOperation: false,
-        reason: "[SIMULATED] Destination service prohibits automation. User must act manually.",
+        reason:
+          "[SIMULATED] Destination service prohibits automation. User must act manually.",
       };
     }
 
     return {
       eligible: true,
       supportsOperation: true,
-      reason: "[SIMULATED] Mock execution provider is ready for local simulation.",
+      reason:
+        "[SIMULATED] Mock execution provider is ready for local simulation.",
     };
   }
 
@@ -64,7 +68,8 @@ export class MockExecutionProvider implements ExecutionProvider {
           "[SIMULATED] Mock execution failed: simulated remote validation error.",
         details: {
           simulated: true,
-          error: "[SIMULATED] The simulated endpoint rejected the payload validation.",
+          error:
+            "[SIMULATED] The simulated endpoint rejected the payload validation.",
         },
         canVerifyOutcome: true,
       };
@@ -76,16 +81,19 @@ export class MockExecutionProvider implements ExecutionProvider {
       status: "succeeded",
       providerName: this.name,
       isSimulated: true,
-      resultSummary: `[SIMULATED] Executed simulated operation: ${context.operation.description}`,
+      resultSummary:
+        `[SIMULATED] Executed simulated operation: ${context.operation.description}`,
       details: {
         simulated: true,
-        notice: "SIMULATED LOCAL RESULT: No real external actions were executed or websites contacted.",
+        notice:
+          "SIMULATED LOCAL RESULT: No real external actions were executed or websites contacted.",
         operationType: context.operation.operationType,
         destination: context.operation.destination ?? "local-mock",
       },
       evidence: {
         kind: "simulated",
-        note: `[SIMULATED] Mock evidence: executed ${context.operation.description} for action ${context.actionId}.`,
+        note:
+          `[SIMULATED] Mock evidence: executed ${context.operation.description} for action ${context.actionId}.`,
         recordedAt: new Date().toISOString(),
       },
       canVerifyOutcome: true,

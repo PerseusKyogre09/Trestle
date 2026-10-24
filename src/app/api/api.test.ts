@@ -20,29 +20,32 @@ describe("Route Handlers API Integration", () => {
     await prisma.case.deleteMany();
 
     const compiled = new RuleBasedWorkflowCompiler().compile(
-      "I lost my wallet containing my debit card and driving licence."
+      "I lost my wallet containing my debit card and driving licence.",
     );
     const created = await createCase(
       "I lost my wallet containing my debit card and driving licence.",
-      compiled.workflow!
+      compiled.workflow!,
     );
     caseId = created.id;
     actionId = created.actions.find((a) => a.id === "secure-cards")!.id;
   });
 
   it("prevents directly marking an action completed via PATCH if approval is required", async () => {
-    const req = new Request(`http://localhost/api/cases/${caseId}/actions/${actionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: "completed",
-        evidence: {
-          kind: "user_provided",
-          note: "Attacker attempting to bypass approval",
-          recordedAt: new Date().toISOString(),
-        },
-      }),
-    });
+    const req = new Request(
+      `http://localhost/api/cases/${caseId}/actions/${actionId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "completed",
+          evidence: {
+            kind: "user_provided",
+            note: "Attacker attempting to bypass approval",
+            recordedAt: new Date().toISOString(),
+          },
+        }),
+      },
+    );
 
     const res = await patchActionRoute(req, {
       params: Promise.resolve({ id: caseId, actionId }),
@@ -67,7 +70,7 @@ describe("Route Handlers API Integration", () => {
             payload: { cardId: "card_4321" },
           },
         }),
-      }
+      },
     );
     const approvalRes = await requestApprovalRoute(approvalReq, {
       params: Promise.resolve({ id: caseId, actionId }),
@@ -78,7 +81,9 @@ describe("Route Handlers API Integration", () => {
     expect(approvalData.status).toBe("pending");
 
     // 2. List approvals via API
-    const listReq = new Request(`http://localhost/api/cases/${caseId}/approvals`);
+    const listReq = new Request(
+      `http://localhost/api/cases/${caseId}/approvals`,
+    );
     const listRes = await getApprovalsRoute(listReq, {
       params: Promise.resolve({ id: caseId }),
     });
@@ -97,7 +102,7 @@ describe("Route Handlers API Integration", () => {
           decision: "approve",
           notes: "Approved by account holder",
         }),
-      }
+      },
     );
     const decideRes = await decideApprovalRoute(decideReq, {
       params: Promise.resolve({ id: caseId, approvalId: approvalData.id }),
@@ -114,13 +119,13 @@ describe("Route Handlers API Integration", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: {
-            operationType: "freeze_card",
+            operationType: "enter_form_details",
             description: "Card lock request",
             destination: "https://bank.example/freeze",
             payload: { cardId: "card_4321" },
           },
         }),
-      }
+      },
     );
     const executeRes = await executeRoute(executeReq, {
       params: Promise.resolve({ id: caseId, actionId }),
@@ -132,7 +137,7 @@ describe("Route Handlers API Integration", () => {
 
     // 5. Query execution history via API
     const getExecReq = new Request(
-      `http://localhost/api/cases/${caseId}/actions/${actionId}/executions`
+      `http://localhost/api/cases/${caseId}/actions/${actionId}/executions`,
     );
     const getExecRes = await getExecutionsRoute(getExecReq, {
       params: Promise.resolve({ id: caseId, actionId }),

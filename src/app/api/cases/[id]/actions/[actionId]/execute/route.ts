@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { executeActionSchema } from "../../../../../../../domain/validation";
 import {
-  ExecutionControllerError,
   executionController,
+  ExecutionControllerError,
 } from "../../../../../../../server/execution/controller";
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string; actionId: string }> }
+  { params }: { params: Promise<{ id: string; actionId: string }> },
 ) {
   const { id, actionId } = await params;
   const rawJson = await request.json().catch(() => ({}));
@@ -15,8 +15,11 @@ export async function POST(
 
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Invalid execution parameters." },
-      { status: 400 }
+      {
+        error: parsed.error.issues[0]?.message ??
+          "Invalid execution parameters.",
+      },
+      { status: 400 },
     );
   }
 
@@ -28,11 +31,17 @@ export async function POST(
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ExecutionControllerError) {
-      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, {
+        status: error.statusCode,
+      });
     }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Execution failed unexpectedly." },
-      { status: 500 }
+      {
+        error: error instanceof Error
+          ? error.message
+          : "Execution failed unexpectedly.",
+      },
+      { status: 500 },
     );
   }
 }

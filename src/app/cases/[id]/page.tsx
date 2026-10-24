@@ -8,7 +8,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import type { Action, Approval, Case, ExecutionAttempt } from "../../../domain/types";
+import type {
+  Action,
+  Approval,
+  Case,
+  ExecutionAttempt,
+} from "../../../domain/types";
 import ActionDetailPanel from "../../components/ActionDetailPanel";
 
 const ActionGraph = dynamic(() => import("../../components/ActionGraph"), {
@@ -62,7 +67,9 @@ export default function CasePage() {
   const [submittingReq, setSubmittingReq] = useState(false);
 
   // Execution state
-  const [executingActionId, setExecutingActionId] = useState<string | null>(null);
+  const [executingActionId, setExecutingActionId] = useState<string | null>(
+    null,
+  );
 
   // Execution history modal
   const [historyAction, setHistoryAction] = useState<Action | null>(null);
@@ -78,7 +85,9 @@ export default function CasePage() {
           fetch(`/api/cases/${id}/approvals`),
         ]);
         const caseData = await caseRes.json();
-        if (!caseRes.ok) throw new Error(caseData.error || "Failed to load case");
+        if (!caseRes.ok) {
+          throw new Error(caseData.error || "Failed to load case");
+        }
         if (isMounted) setItem(caseData);
 
         if (approvalsRes.ok) {
@@ -86,7 +95,9 @@ export default function CasePage() {
           if (isMounted) setApprovals(approvalsData);
         }
       } catch (e: unknown) {
-        if (isMounted) setError(e instanceof Error ? e.message : "Failed to load case");
+        if (isMounted) {
+          setError(e instanceof Error ? e.message : "Failed to load case");
+        }
       }
     };
 
@@ -118,14 +129,13 @@ export default function CasePage() {
   // Status transition (shared by list and graph views)
   const transition = useCallback(
     async (action: Action, status: "in_progress" | "completed" | "failed") => {
-      const evidence =
-        status === "completed"
-          ? {
-              kind: "user_provided" as const,
-              note: "User marked this task complete after reviewing the result.",
-              recordedAt: new Date().toISOString(),
-            }
-          : undefined;
+      const evidence = status === "completed"
+        ? {
+          kind: "user_provided" as const,
+          note: "User marked this task complete after reviewing the result.",
+          recordedAt: new Date().toISOString(),
+        }
+        : undefined;
 
       const r = await fetch(`/api/cases/${id}/actions/${action.id}`, {
         method: "PATCH",
@@ -139,15 +149,16 @@ export default function CasePage() {
       }
       await refreshData();
     },
-    [id, refreshData]
+    [id, refreshData],
   );
 
   const handleNodeSelect = useCallback(
     (action: Action | null) => setSelectedActionId(action?.id ?? null),
-    []
+    [],
   );
 
-  const selectedAction = item?.actions.find((a) => a.id === selectedActionId) ?? null;
+  const selectedAction = item?.actions.find((a) => a.id === selectedActionId) ??
+    null;
 
   // Open the prepare modal with intelligent defaults
   const openPrepareModal = (action: Action) => {
@@ -167,8 +178,8 @@ export default function CasePage() {
             actionType: "temporary_lock",
           },
           null,
-          2
-        )
+          2,
+        ),
       );
       setPrepProhibitsAuto(false);
     } else if (action.id === "prepare-replacements") {
@@ -183,14 +194,24 @@ export default function CasePage() {
             applicantName: "Sample Holder",
           },
           null,
-          2
-        )
+          2,
+        ),
       );
       setPrepProhibitsAuto(false);
     } else {
-      setPrepOpType(action.riskLevel === "critical" ? "submit_declaration" : "enter_form_details");
+      setPrepOpType(
+        action.riskLevel === "critical"
+          ? "submit_declaration"
+          : "enter_form_details",
+      );
       setPrepDest("https://portal.example.gov");
-      setPrepPayloadStr(JSON.stringify({ actionId: action.id, details: action.description }, null, 2));
+      setPrepPayloadStr(
+        JSON.stringify(
+          { actionId: action.id, details: action.description },
+          null,
+          2,
+        ),
+      );
       setPrepProhibitsAuto(false);
     }
   };
@@ -210,19 +231,22 @@ export default function CasePage() {
         throw new Error("Payload must be valid JSON.");
       }
 
-      const res = await fetch(`/api/cases/${id}/actions/${preparingAction.id}/approval`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: {
-            operationType: prepOpType,
-            description: prepDesc,
-            destination: prepDest || undefined,
-            payload: parsedPayload,
-            prohibitsAutomation: prepProhibitsAuto,
-          },
-        }),
-      });
+      const res = await fetch(
+        `/api/cases/${id}/actions/${preparingAction.id}/approval`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: {
+              operationType: prepOpType,
+              description: prepDesc,
+              destination: prepDest || undefined,
+              payload: parsedPayload,
+              prohibitsAutomation: prepProhibitsAuto,
+            },
+          }),
+        },
+      );
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -231,7 +255,9 @@ export default function CasePage() {
       setPreparingAction(null);
       await refreshData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to submit approval request");
+      setError(
+        e instanceof Error ? e.message : "Failed to submit approval request",
+      );
     } finally {
       setSubmittingReq(false);
     }
@@ -245,15 +271,18 @@ export default function CasePage() {
     setError("");
 
     try {
-      const res = await fetch(`/api/cases/${id}/approvals/${reviewApproval.id}/decide`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          decision,
-          notes: decisionNotes.trim() || undefined,
-          reason: decisionNotes.trim() || undefined,
-        }),
-      });
+      const res = await fetch(
+        `/api/cases/${id}/approvals/${reviewApproval.id}/decide`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            decision,
+            notes: decisionNotes.trim() || undefined,
+            reason: decisionNotes.trim() || undefined,
+          }),
+        },
+      );
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -261,7 +290,7 @@ export default function CasePage() {
       setFeedback(
         decision === "approve"
           ? `Operation approved for execution.`
-          : `Operation was rejected.`
+          : `Operation was rejected.`,
       );
       setReviewApproval(null);
       setDecisionNotes("");
@@ -281,7 +310,7 @@ export default function CasePage() {
 
     try {
       const latestApproved = approvals.find(
-        (ap) => ap.actionId === action.id && ap.status === "approved"
+        (ap) => ap.actionId === action.id && ap.status === "approved",
       );
 
       let operation = undefined;
@@ -291,7 +320,10 @@ export default function CasePage() {
             operationType: "final_action_completion",
             description: latestApproved.operationDescription,
             destination: latestApproved.destination ?? undefined,
-            payload: JSON.parse(latestApproved.payload) as Record<string, unknown>,
+            payload: JSON.parse(latestApproved.payload) as Record<
+              string,
+              unknown
+            >,
           };
         } catch {
           // fallback
@@ -316,7 +348,7 @@ export default function CasePage() {
         setFeedback(
           `Execution completed with UNCERTAIN outcome: ${
             data.uncertaintyReason || "Needs reconciliation"
-          }`
+          }`,
         );
       } else {
         setFeedback(`Operation executed. Outcome status: ${data.outcome}.`);
@@ -334,7 +366,9 @@ export default function CasePage() {
     setHistoryAction(action);
     setLoadingHistory(true);
     try {
-      const res = await fetch(`/api/cases/${id}/actions/${action.id}/executions`);
+      const res = await fetch(
+        `/api/cases/${id}/actions/${action.id}/executions`,
+      );
       if (res.ok) {
         const data = await res.json();
         setActionHistory(data);
@@ -352,7 +386,10 @@ export default function CasePage() {
         <p className="rounded-lg border border-rose-900/60 bg-rose-950/40 p-4 text-rose-300">
           {error}
         </p>
-        <Link href="/" className="mt-6 inline-block text-blue-300 hover:underline">
+        <Link
+          href="/"
+          className="mt-6 inline-block text-blue-300 hover:underline"
+        >
           ← Back to cases
         </Link>
       </main>
@@ -360,11 +397,16 @@ export default function CasePage() {
   }
 
   if (!item) {
-    return <main className="mx-auto max-w-5xl px-6 py-10 text-slate-400">Loading case…</main>;
+    return (
+      <main className="mx-auto max-w-5xl px-6 py-10 text-slate-400">
+        Loading case…
+      </main>
+    );
   }
 
   const completed = item.actions.filter((a) => a.status === "completed").length;
-  const counts = (status: string) => item.actions.filter((a) => a.status === status).length;
+  const counts = (status: string) =>
+    item.actions.filter((a) => a.status === status).length;
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
 
   return (
@@ -396,7 +438,9 @@ export default function CasePage() {
               Local Dev Mode · Backend Enforced
             </span>
           </div>
-          <h1 className="mt-3 text-4xl font-semibold text-slate-100">{item.title}</h1>
+          <h1 className="mt-3 text-4xl font-semibold text-slate-100">
+            {item.title}
+          </h1>
           <p className="mt-4 max-w-3xl text-slate-300">{item.originalInput}</p>
 
           {/* Stats */}
@@ -408,9 +452,14 @@ export default function CasePage() {
               ["Blocked", counts("blocked")],
               ["Failed", counts("failed")],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+              <div
+                key={label}
+                className="rounded-lg border border-slate-800 bg-slate-900/50 p-3"
+              >
                 <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-100">{value}</p>
+                <p className="mt-1 text-xl font-semibold text-slate-100">
+                  {value}
+                </p>
               </div>
             ))}
           </div>
@@ -447,7 +496,9 @@ export default function CasePage() {
         <section className="mt-8 rounded-xl border border-orange-900/40 bg-orange-950/20 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-900/30 pb-3">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-orange-200">Human Approval Queue</h2>
+              <h2 className="text-lg font-semibold text-orange-200">
+                Human Approval Queue
+              </h2>
               <span className="rounded-full bg-orange-900/80 px-2.5 py-0.5 text-xs font-semibold text-orange-200">
                 {pendingApprovals.length} pending
               </span>
@@ -457,256 +508,295 @@ export default function CasePage() {
             </p>
           </div>
 
-          {pendingApprovals.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-400">
-              No pending approval requests. Eligible low-risk tasks may proceed automatically.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {pendingApprovals.map((app) => {
-                const linkedAction = item.actions.find((a) => a.id === app.actionId);
-                return (
-                  <div
-                    key={app.id}
-                    className="flex flex-col justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/80 p-4 sm:flex-row sm:items-center"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-slate-200">
-                          {linkedAction?.title || app.actionId}
-                        </span>
-                        <span
-                          className={`rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${
-                            riskTone[app.riskCategory] || riskTone.requires_review
-                          }`}
-                        >
-                          {app.riskCategory.replace("_", " ")}
-                        </span>
-                        {app.prohibitsAutomation && (
-                          <span className="rounded border border-rose-800/80 bg-rose-950/80 px-2 py-0.5 text-xs text-rose-300">
-                            Personal Action Only
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-slate-300">{app.operationDescription}</p>
-                      {app.destination && (
-                        <p className="text-xs text-slate-400">
-                          Target: <code className="text-blue-300">{app.destination}</code>
-                        </p>
-                      )}
-                      <p className="text-xs text-slate-500">
-                        Payload Hash:{" "}
-                        <code className="text-slate-400">{app.payloadHash.slice(0, 16)}…</code>{" "}
-                        · Expires: {new Date(app.expiresAt).toLocaleTimeString()}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setReviewApproval(app);
-                        setDecisionNotes("");
-                      }}
-                      className="shrink-0 rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-500"
+          {pendingApprovals.length === 0
+            ? (
+              <p className="mt-4 text-sm text-slate-400">
+                No pending approval requests. Eligible low-risk tasks may
+                proceed automatically.
+              </p>
+            )
+            : (
+              <div className="mt-4 space-y-3">
+                {pendingApprovals.map((app) => {
+                  const linkedAction = item.actions.find((a) =>
+                    a.id === app.actionId
+                  );
+                  return (
+                    <div
+                      key={app.id}
+                      className="flex flex-col justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/80 p-4 sm:flex-row sm:items-center"
                     >
-                      Review Operation
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-slate-200">
+                            {linkedAction?.title || app.actionId}
+                          </span>
+                          <span
+                            className={`rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${
+                              riskTone[app.riskCategory] ||
+                              riskTone.requires_review
+                            }`}
+                          >
+                            {app.riskCategory.replace("_", " ")}
+                          </span>
+                          {app.prohibitsAutomation && (
+                            <span className="rounded border border-rose-800/80 bg-rose-950/80 px-2 py-0.5 text-xs text-rose-300">
+                              Personal Action Only
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-300">
+                          {app.operationDescription}
+                        </p>
+                        {app.destination && (
+                          <p className="text-xs text-slate-400">
+                            Target:{" "}
+                            <code className="text-blue-300">
+                              {app.destination}
+                            </code>
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500">
+                          Payload Hash:{" "}
+                          <code className="text-slate-400">
+                            {app.payloadHash.slice(0, 16)}…
+                          </code>{" "}
+                          · Expires:{" "}
+                          {new Date(app.expiresAt).toLocaleTimeString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setReviewApproval(app);
+                          setDecisionNotes("");
+                        }}
+                        className="shrink-0 rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-500"
+                      >
+                        Review Operation
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
         </section>
       </div>
 
       {/* ── Content area: List View or Graph View ────────────────────────────── */}
-      {view === "list" ? (
-        <div className="mx-auto w-full max-w-7xl px-6 pb-10 sm:px-10">
-          <section className="mt-8 space-y-4">
-            <h2 className="text-xl font-semibold text-slate-100">Case Actions</h2>
-            {item.actions.map((action) => {
-              const blockedBy = action.dependencies.filter(
-                (d) => item.actions.find((a) => a.id === d)?.status !== "completed"
-              );
-              const isBlocked = blockedBy.length > 0;
-              const actionApprovals = approvals.filter((a) => a.actionId === action.id);
-              const activeApproved = actionApprovals.find((a) => a.status === "approved");
-              const activePending = actionApprovals.find((a) => a.status === "pending");
+      {view === "list"
+        ? (
+          <div className="mx-auto w-full max-w-7xl px-6 pb-10 sm:px-10">
+            <section className="mt-8 space-y-4">
+              <h2 className="text-xl font-semibold text-slate-100">
+                Case Actions
+              </h2>
+              {item.actions.map((action) => {
+                const blockedBy = action.dependencies.filter(
+                  (d) =>
+                    item.actions.find((a) => a.id === d)?.status !==
+                      "completed",
+                );
+                const isBlocked = blockedBy.length > 0;
+                const actionApprovals = approvals.filter((a) =>
+                  a.actionId === action.id
+                );
+                const activeApproved = actionApprovals.find((a) =>
+                  a.status === "approved"
+                );
+                const activePending = actionApprovals.find((a) =>
+                  a.status === "pending"
+                );
 
-              const canExecute =
-                !isBlocked &&
-                action.status !== "completed" &&
-                (!action.approvalRequired || activeApproved);
+                const canExecute = !isBlocked &&
+                  action.status !== "completed" &&
+                  (!action.approvalRequired || activeApproved);
 
-              return (
-                <article
-                  key={action.id}
-                  className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 transition-colors"
-                >
-                  <div className="flex flex-col justify-between gap-3 sm:flex-row">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h3 className="text-lg font-medium text-slate-100">{action.title}</h3>
-                        <span
-                          className={`text-xs font-semibold uppercase tracking-wider ${
-                            tone[action.status] || "text-slate-400"
-                          }`}
+                return (
+                  <article
+                    key={action.id}
+                    className="rounded-xl border border-slate-800 bg-slate-900/50 p-5 transition-colors"
+                  >
+                    <div className="flex flex-col justify-between gap-3 sm:flex-row">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h3 className="text-lg font-medium text-slate-100">
+                            {action.title}
+                          </h3>
+                          <span
+                            className={`text-xs font-semibold uppercase tracking-wider ${
+                              tone[action.status] || "text-slate-400"
+                            }`}
+                          >
+                            {action.status.replace("_", " ")}
+                          </span>
+                          {activeApproved && (
+                            <span className="rounded-full border border-emerald-800/80 bg-emerald-950/60 px-2 py-0.5 text-xs text-emerald-300">
+                              Authorised
+                            </span>
+                          )}
+                          {activePending && (
+                            <span className="rounded-full border border-orange-800/80 bg-orange-950/60 px-2 py-0.5 text-xs text-orange-300">
+                              Approval Pending
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm leading-6 text-slate-400">
+                          {action.description}
+                        </p>
+                      </div>
+
+                      {/* Action Controls */}
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {/* Prepare & Request Approval Button */}
+                        {action.status !== "completed" && !activeApproved && (
+                          <button
+                            onClick={() => openPrepareModal(action)}
+                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
+                          >
+                            Prepare & Request Approval
+                          </button>
+                        )}
+
+                        {/* Execute Button */}
+                        {canExecute && (
+                          <button
+                            onClick={() => executeAction(action)}
+                            disabled={executingActionId === action.id}
+                            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                          >
+                            {executingActionId === action.id
+                              ? "Executing…"
+                              : "Execute via Mock Provider"}
+                          </button>
+                        )}
+
+                        {/* History Button */}
+                        <button
+                          onClick={() => viewHistory(action)}
+                          className="rounded-md border border-slate-800 px-3 py-2 text-xs text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                         >
-                          {action.status.replace("_", " ")}
+                          Audit & History
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Status & Security Explanations */}
+                    {isBlocked && (
+                      <div className="mt-3 rounded border border-amber-900/50 bg-amber-950/30 p-2.5 text-xs text-amber-200">
+                        <strong>Cannot proceed:</strong>{" "}
+                        Blocked by incomplete prerequisites:{" "}
+                        {blockedBy.join(", ")}.
+                      </div>
+                    )}
+                    {action.approvalRequired && !activeApproved && !isBlocked &&
+                      (
+                        <div className="mt-3 rounded border border-orange-900/50 bg-orange-950/30 p-2.5 text-xs text-orange-200">
+                          <strong>Approval Required:</strong>{" "}
+                          This action involves sensitive details or
+                          consequential changes. Human approval must be granted
+                          before automated execution is permitted.
+                        </div>
+                      )}
+
+                    {/* Action Metadata Grid */}
+                    <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4 text-sm sm:grid-cols-3">
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-slate-500">
+                          Prerequisites
                         </span>
-                        {activeApproved && (
-                          <span className="rounded-full border border-emerald-800/80 bg-emerald-950/60 px-2 py-0.5 text-xs text-emerald-300">
-                            Authorised
-                          </span>
-                        )}
-                        {activePending && (
-                          <span className="rounded-full border border-orange-800/80 bg-orange-950/60 px-2 py-0.5 text-xs text-orange-300">
-                            Approval Pending
-                          </span>
-                        )}
+                        <p className="mt-1 text-slate-300">
+                          {action.dependencies.length
+                            ? action.dependencies.join(", ")
+                            : "None"}
+                        </p>
                       </div>
-                      <p className="text-sm leading-6 text-slate-400">{action.description}</p>
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-slate-500">
+                          Risk & Policy
+                        </span>
+                        <p className="mt-1 text-slate-300">
+                          {action.riskLevel.toUpperCase()} ·{" "}
+                          {action.approvalRequired
+                            ? "Human approval mandatory"
+                            : "Low risk (auto-eligible)"}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-slate-500">
+                          Success Criteria
+                        </span>
+                        <p className="mt-1 text-slate-300">
+                          {action.successCriteria.join(" ")}
+                        </p>
+                      </div>
                     </div>
 
-                    {/* Action Controls */}
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      {/* Prepare & Request Approval Button */}
-                      {action.status !== "completed" && !activeApproved && (
-                        <button
-                          onClick={() => openPrepareModal(action)}
-                          className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
-                        >
-                          Prepare & Request Approval
-                        </button>
-                      )}
-
-                      {/* Execute Button */}
-                      {canExecute && (
-                        <button
-                          onClick={() => executeAction(action)}
-                          disabled={executingActionId === action.id}
-                          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-                        >
-                          {executingActionId === action.id
-                            ? "Executing…"
-                            : "Execute via Mock Provider"}
-                        </button>
-                      )}
-
-                      {/* History Button */}
-                      <button
-                        onClick={() => viewHistory(action)}
-                        className="rounded-md border border-slate-800 px-3 py-2 text-xs text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-                      >
-                        Audit & History
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Status & Security Explanations */}
-                  {isBlocked && (
-                    <div className="mt-3 rounded border border-amber-900/50 bg-amber-950/30 p-2.5 text-xs text-amber-200">
-                      <strong>Cannot proceed:</strong> Blocked by incomplete prerequisites:{" "}
-                      {blockedBy.join(", ")}.
-                    </div>
-                  )}
-                  {action.approvalRequired && !activeApproved && !isBlocked && (
-                    <div className="mt-3 rounded border border-orange-900/50 bg-orange-950/30 p-2.5 text-xs text-orange-200">
-                      <strong>Approval Required:</strong> This action involves sensitive details or
-                      consequential changes. Human approval must be granted before automated
-                      execution is permitted.
-                    </div>
-                  )}
-
-                  {/* Action Metadata Grid */}
-                  <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4 text-sm sm:grid-cols-3">
-                    <div>
-                      <span className="text-xs uppercase tracking-wider text-slate-500">
-                        Prerequisites
-                      </span>
-                      <p className="mt-1 text-slate-300">
-                        {action.dependencies.length ? action.dependencies.join(", ") : "None"}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-xs uppercase tracking-wider text-slate-500">
-                        Risk & Policy
-                      </span>
-                      <p className="mt-1 text-slate-300">
-                        {action.riskLevel.toUpperCase()} ·{" "}
-                        {action.approvalRequired
-                          ? "Human approval mandatory"
-                          : "Low risk (auto-eligible)"}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-xs uppercase tracking-wider text-slate-500">
-                        Success Criteria
-                      </span>
-                      <p className="mt-1 text-slate-300">{action.successCriteria.join(" ")}</p>
-                    </div>
-                  </div>
-
-                  {/* Evidence cards if present */}
-                  {action.evidence.length > 0 && (
-                    <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-950/40 p-3">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                        Recorded Evidence ({action.evidence.length})
-                      </span>
-                      <div className="mt-2 space-y-1.5">
-                        {action.evidence.map((ev, i) => (
-                          <div key={i} className="flex items-center gap-2 text-xs">
-                            <span
-                              className={`rounded px-1.5 py-0.5 uppercase tracking-wide ${
-                                ev.kind === "simulated"
-                                  ? "bg-amber-950/70 text-amber-300"
-                                  : "bg-emerald-950/70 text-emerald-300"
-                              }`}
+                    {/* Evidence cards if present */}
+                    {action.evidence.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-slate-800/80 bg-slate-950/40 p-3">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                          Recorded Evidence ({action.evidence.length})
+                        </span>
+                        <div className="mt-2 space-y-1.5">
+                          {action.evidence.map((ev, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-2 text-xs"
                             >
-                              {ev.kind}
-                            </span>
-                            <span className="text-slate-300">{ev.note}</span>
-                            <span className="text-slate-500 ml-auto">
-                              {new Date(ev.recordedAt).toLocaleTimeString()}
-                            </span>
-                          </div>
-                        ))}
+                              <span
+                                className={`rounded px-1.5 py-0.5 uppercase tracking-wide ${
+                                  ev.kind === "simulated"
+                                    ? "bg-amber-950/70 text-amber-300"
+                                    : "bg-emerald-950/70 text-emerald-300"
+                                }`}
+                              >
+                                {ev.kind}
+                              </span>
+                              <span className="text-slate-300">{ev.note}</span>
+                              <span className="text-slate-500 ml-auto">
+                                {new Date(ev.recordedAt).toLocaleTimeString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </section>
-        </div>
-      ) : (
-        /* Graph view */
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
-          {/* Canvas */}
-          <div
-            className="flex-1"
-            style={{ height: "calc(100vh - 380px)", minHeight: "400px" }}
-            role="region"
-            aria-label="Action dependency graph"
-          >
-            <ActionGraph
-              actions={item.actions}
-              selectedActionId={selectedActionId}
-              onNodeSelect={handleNodeSelect}
-            />
+                    )}
+                  </article>
+                );
+              })}
+            </section>
           </div>
-
-          {/* Detail panel */}
-          {selectedAction && (
-            <div className="min-h-80 w-full shrink-0 overflow-y-auto lg:min-h-0 lg:w-80">
-              <ActionDetailPanel
-                action={selectedAction}
-                caseItem={item}
-                onClose={() => setSelectedActionId(null)}
-                onTransition={transition}
+        )
+        : (
+          /* Graph view */
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+            {/* Canvas */}
+            <div
+              className="flex-1"
+              style={{ height: "calc(100vh - 380px)", minHeight: "400px" }}
+              role="region"
+              aria-label="Action dependency graph"
+            >
+              <ActionGraph
+                actions={item.actions}
+                selectedActionId={selectedActionId}
+                onNodeSelect={handleNodeSelect}
               />
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Detail panel */}
+            {selectedAction && (
+              <div className="min-h-80 w-full shrink-0 overflow-y-auto lg:min-h-0 lg:w-80">
+                <ActionDetailPanel
+                  action={selectedAction}
+                  caseItem={item}
+                  onClose={() => setSelectedActionId(null)}
+                  onTransition={transition}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
       {/* Review & Decide Modal */}
       {reviewApproval && (
@@ -716,7 +806,8 @@ export default function CasePage() {
               <div>
                 <span
                   className={`rounded border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${
-                    riskTone[reviewApproval.riskCategory] || riskTone.requires_review
+                    riskTone[reviewApproval.riskCategory] ||
+                    riskTone.requires_review
                   }`}
                 >
                   {reviewApproval.riskCategory.replace("_", " ")}
@@ -735,7 +826,9 @@ export default function CasePage() {
 
             <div className="mt-4 space-y-4 text-sm">
               <div>
-                <span className="text-xs uppercase tracking-wider text-slate-500">Operation</span>
+                <span className="text-xs uppercase tracking-wider text-slate-500">
+                  Operation
+                </span>
                 <p className="mt-1 text-slate-200 font-medium">
                   {reviewApproval.operationDescription}
                 </p>
@@ -778,9 +871,10 @@ export default function CasePage() {
 
               {reviewApproval.prohibitsAutomation && (
                 <div className="rounded border border-rose-800 bg-rose-950/60 p-3 text-xs text-rose-200">
-                  <strong>Automation Prohibited:</strong> This destination service requires personal
-                  interaction or prohibits automated completion. Approval for automated execution is
-                  disabled; you must complete this step manually.
+                  <strong>Automation Prohibited:</strong>{" "}
+                  This destination service requires personal interaction or
+                  prohibits automated completion. Approval for automated
+                  execution is disabled; you must complete this step manually.
                 </div>
               )}
 
@@ -857,15 +951,27 @@ export default function CasePage() {
                   onChange={(e) => setPrepOpType(e.target.value)}
                   className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-xs text-slate-200 focus:outline-none"
                 >
-                  <option value="enter_form_details">enter_form_details (Requires Review)</option>
+                  <option value="enter_form_details">
+                    enter_form_details (Requires Review)
+                  </option>
                   <option value="select_document_upload">
                     select_document_upload (Requires Review)
                   </option>
-                  <option value="modify_record">modify_record (Requires Review)</option>
-                  <option value="submit_declaration">submit_declaration (High Consequence)</option>
-                  <option value="make_payment">make_payment (High Consequence)</option>
-                  <option value="cancel_service">cancel_service (High Consequence)</option>
-                  <option value="read_public_info">read_public_info (Low Risk)</option>
+                  <option value="modify_record">
+                    modify_record (Requires Review)
+                  </option>
+                  <option value="submit_declaration">
+                    submit_declaration (High Consequence)
+                  </option>
+                  <option value="make_payment">
+                    make_payment (High Consequence)
+                  </option>
+                  <option value="cancel_service">
+                    cancel_service (High Consequence)
+                  </option>
+                  <option value="read_public_info">
+                    read_public_info (Low Risk)
+                  </option>
                 </select>
               </div>
 
@@ -914,7 +1020,10 @@ export default function CasePage() {
                   onChange={(e) => setPrepProhibitsAuto(e.target.checked)}
                   className="rounded border-slate-700 bg-slate-950"
                 />
-                <label htmlFor="prohibitAuto" className="text-xs text-slate-300">
+                <label
+                  htmlFor="prohibitAuto"
+                  className="text-xs text-slate-300"
+                >
                   Service prohibits automation / requires personal user presence
                 </label>
               </div>
@@ -945,7 +1054,9 @@ export default function CasePage() {
           <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
             <div className="flex items-start justify-between border-b border-slate-800 pb-4">
               <div>
-                <h3 className="text-xl font-semibold text-slate-100">Execution Audit Log</h3>
+                <h3 className="text-xl font-semibold text-slate-100">
+                  Execution Audit Log
+                </h3>
                 <p className="mt-1 text-xs text-slate-400">
                   Action: {historyAction.title} ({historyAction.id})
                 </p>
@@ -959,49 +1070,61 @@ export default function CasePage() {
             </div>
 
             <div className="mt-4 max-h-96 overflow-auto text-sm">
-              {loadingHistory ? (
-                <p className="text-slate-400 text-xs">Loading execution history…</p>
-              ) : actionHistory.length === 0 ? (
-                <p className="text-slate-400 text-xs">No execution attempts recorded yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {actionHistory.map((att) => (
-                    <div
-                      key={att.id}
-                      className="rounded border border-slate-800 bg-slate-950/70 p-3 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span
-                          className={`font-semibold uppercase tracking-wider ${
-                            att.status === "succeeded"
-                              ? "text-emerald-300"
-                              : att.status === "uncertain"
-                              ? "text-amber-300"
-                              : "text-rose-300"
-                          }`}
-                        >
-                          {att.status}
-                        </span>
-                        {att.isSimulated && (
-                          <span className="rounded bg-amber-950 px-2 py-0.5 text-amber-300">
-                            [SIMULATED]
+              {loadingHistory
+                ? (
+                  <p className="text-slate-400 text-xs">
+                    Loading execution history…
+                  </p>
+                )
+                : actionHistory.length === 0
+                ? (
+                  <p className="text-slate-400 text-xs">
+                    No execution attempts recorded yet.
+                  </p>
+                )
+                : (
+                  <div className="space-y-3">
+                    {actionHistory.map((att) => (
+                      <div
+                        key={att.id}
+                        className="rounded border border-slate-800 bg-slate-950/70 p-3 text-xs"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`font-semibold uppercase tracking-wider ${
+                              att.status === "succeeded"
+                                ? "text-emerald-300"
+                                : att.status === "uncertain"
+                                ? "text-amber-300"
+                                : "text-rose-300"
+                            }`}
+                          >
+                            {att.status}
                           </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-slate-200">{att.resultSummary}</p>
-                      {att.uncertaintyReason && (
-                        <p className="mt-1 text-amber-300">
-                          <strong>Uncertainty:</strong> {att.uncertaintyReason}
+                          {att.isSimulated && (
+                            <span className="rounded bg-amber-950 px-2 py-0.5 text-amber-300">
+                              [SIMULATED]
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-slate-200">
+                          {att.resultSummary}
                         </p>
-                      )}
-                      <p className="mt-2 text-slate-500 font-mono">
-                        Started: {new Date(att.startedAt).toLocaleString()} · Provider:{" "}
-                        {att.provider}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+                        {att.uncertaintyReason && (
+                          <p className="mt-1 text-amber-300">
+                            <strong>Uncertainty:</strong>{" "}
+                            {att.uncertaintyReason}
+                          </p>
+                        )}
+                        <p className="mt-2 text-slate-500 font-mono">
+                          Started: {new Date(att.startedAt).toLocaleString()}
+                          {" "}
+                          · Provider: {att.provider}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
 
             <div className="mt-6 flex justify-end border-t border-slate-800 pt-4">

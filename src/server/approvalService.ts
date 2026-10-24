@@ -1,9 +1,15 @@
-import type { Action, Approval, Evidence, ProposedOperation } from "../domain/types";
+import type {
+  Action,
+  Approval,
+  Evidence,
+  ProposedOperation,
+} from "../domain/types";
 import { canonicalizeJson, hashPayload, scrubSensitiveData } from "./crypto";
 import { evaluatePolicy } from "./policy";
 import { prisma } from "./db";
 import {
   createApproval,
+  decideApprovalAtomically,
   getApprovalById,
   getApprovalsByCaseId,
   mapApproval,
@@ -25,7 +31,7 @@ export async function requestApproval(
   caseId: string,
   actionId: string,
   operation: ProposedOperation,
-  expiresInSeconds: number = 86400 // Default 24 hours
+  expiresInSeconds: number = 86400, // Default 24 hours
 ): Promise<Approval> {
   const caseItem = await prisma.case.findUnique({
     where: { id: caseId },
@@ -36,7 +42,9 @@ export async function requestApproval(
     throw new ApprovalError("Case not found.", 404);
   }
 
-  const action = caseItem.actions.find((a: { id: string }) => a.id === actionId);
+  const action = caseItem.actions.find((a: { id: string }) =>
+    a.id === actionId
+  );
   if (!action) {
     throw new ApprovalError("Action does not belong to this case.", 404);
   }
@@ -61,17 +69,19 @@ export async function requestApproval(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000);
 
-  // Invalidate any previous pending approvals for this action to prevent stale duplicates
+  // Invalidate all undecided and previously approved authorizations for this
+  // action. A new request may change the operation contract, so an older
+  // approval must never remain usable for that action.
   const pendingApprovals = await prisma.approval.findMany({
-    where: { caseId, actionId, status: "pending" },
+    where: { caseId, actionId, status: { in: ["pending", "approved"] } },
   });
   for (const pending of pendingApprovals) {
     await updateApproval(pending.id, {
       status: "invalidated",
-      decisionReason: "Superceded by a new approval request.",
+      decisionReason: "Superseded by a new approval request.",
       decisionAudit: JSON.stringify({
         event: "invalidated",
-        reason: "Superceded by a new approval request.",
+        reason: "Superseded by a new approval request.",
         at: now.toISOString(),
       }),
     });
@@ -85,6 +95,7 @@ export async function requestApproval(
     caseId,
     actionId,
     status: "pending",
+    operationType: operation.operationType,
     operationDescription: operation.description,
     destination: operation.destination ?? null,
     payload: canonicalPayloadStr,
@@ -140,7 +151,7 @@ async function expireStaleApprovals(caseId: string): Promise<void> {
  */
 export async function getApprovalsForCase(
   caseId: string,
-  options?: { actionId?: string; status?: Approval["status"] }
+  options?: { actionId?: string; status?: Approval["status"] },
 ): Promise<Approval[]> {
   await expireStaleApprovals(caseId);
   return getApprovalsByCaseId(caseId, options);
@@ -151,7 +162,7 @@ export async function getApprovalsForCase(
  */
 export async function getApproval(
   caseId: string,
-  approvalId: string
+  approvalId: string,
 ): Promise<Approval | null> {
   await expireStaleApprovals(caseId);
   const approval = await getApprovalById(approvalId);
@@ -167,7 +178,7 @@ export async function getApproval(
 export async function approveRequest(
   caseId: string,
   approvalId: string,
-  audit: { decidedBy?: string; notes?: string } = {}
+  audit: { decidedBy?: string; notes?: string } = {},
 ): Promise<Approval> {
   await expireStaleApprovals(caseId);
 
@@ -179,7 +190,7 @@ export async function approveRequest(
   if (approval.status !== "pending") {
     throw new ApprovalError(
       `Cannot approve request: status is already "${approval.status}".`,
-      409
+      409,
     );
   }
 
@@ -195,12 +206,11 @@ export async function approveRequest(
   if (approval.prohibitsAutomation) {
     throw new ApprovalError(
       "Cannot approve automated execution: this service prohibits automation and requires personal action by the user.",
-      400
+      400,
     );
   }
 
-  const updated = await updateApproval(approvalId, {
-    status: "approved",
+  const updated = await decideApprovalAtomically(approvalId, "approved", {
     decidedAt: now,
     decisionReason: audit.notes ?? "Approved by user.",
     decisionAudit: JSON.stringify({
@@ -211,7 +221,13 @@ export async function approveRequest(
     }),
   });
 
-  return updated!;
+  if (!updated) {
+    throw new ApprovalError(
+      "Cannot approve request: it was already decided or expired.",
+      409,
+    );
+  }
+  return updated;
 }
 
 /**
@@ -220,7 +236,7 @@ export async function approveRequest(
 export async function rejectRequest(
   caseId: string,
   approvalId: string,
-  audit: { decidedBy?: string; reason?: string } = {}
+  audit: { decidedBy?: string; reason?: string } = {},
 ): Promise<Approval> {
   await expireStaleApprovals(caseId);
 
@@ -232,13 +248,12 @@ export async function rejectRequest(
   if (approval.status !== "pending") {
     throw new ApprovalError(
       `Cannot reject request: status is already "${approval.status}".`,
-      409
+      409,
     );
   }
 
   const now = new Date();
-  const updated = await updateApproval(approvalId, {
-    status: "rejected",
+  const updated = await decideApprovalAtomically(approvalId, "rejected", {
     decidedAt: now,
     decisionReason: audit.reason ?? "Rejected by user.",
     decisionAudit: JSON.stringify({
@@ -249,7 +264,13 @@ export async function rejectRequest(
     }),
   });
 
-  return updated!;
+  if (!updated) {
+    throw new ApprovalError(
+      "Cannot reject request: it was already decided or expired.",
+      409,
+    );
+  }
+  return updated;
 }
 
 /**
@@ -258,7 +279,7 @@ export async function rejectRequest(
 export async function invalidateApproval(
   caseId: string,
   approvalId: string,
-  reason: string
+  reason: string,
 ): Promise<Approval> {
   const approval = await getApprovalById(approvalId);
   if (!approval || approval.caseId !== caseId) {
@@ -291,7 +312,7 @@ export async function invalidateApproval(
 export async function verifyApprovalForExecution(
   caseId: string,
   actionId: string,
-  currentPayload: Record<string, unknown>
+  operation: ProposedOperation,
 ): Promise<{ valid: boolean; approval?: Approval; reason?: string }> {
   await expireStaleApprovals(caseId);
 
@@ -333,7 +354,7 @@ export async function verifyApprovalForExecution(
   }
 
   // Verify that the payload hash exactly matches
-  const currentHash = hashPayload(currentPayload);
+  const currentHash = hashPayload(operation.payload);
   if (latestApproved.payloadHash !== currentHash) {
     // Material consequences or payload changed!
     await updateApproval(latestApproved.id, {
@@ -353,6 +374,30 @@ export async function verifyApprovalForExecution(
       valid: false,
       reason:
         "The proposed operation payload has changed since approval was granted. Approval has been invalidated.",
+    };
+  }
+
+  if (
+    latestApproved.operationType !== operation.operationType ||
+    latestApproved.operationDescription !== operation.description ||
+    (latestApproved.destination ?? null) !== (operation.destination ?? null)
+  ) {
+    await updateApproval(latestApproved.id, {
+      status: "invalidated",
+      decisionReason:
+        "Operation type, description, or destination changed after approval was granted.",
+      decisionAudit: JSON.stringify({
+        event: "invalidated",
+        reason:
+          "Approved operation contract mismatch immediately before execution.",
+        at: now.toISOString(),
+      }),
+    });
+
+    return {
+      valid: false,
+      reason:
+        "The proposed operation changed since approval was granted. Approval has been invalidated.",
     };
   }
 
