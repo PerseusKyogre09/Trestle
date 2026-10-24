@@ -81,23 +81,14 @@ export default function CasePage() {
         setError(d.error);
         return;
       }
-      // Optimistic update — mirrors existing list-view behaviour
-      setItem((current) =>
-        current
-          ? {
-              ...current,
-              actions: current.actions.map((a) =>
-                a.id === action.id
-                  ? {
-                      ...a,
-                      status,
-                      evidence: evidence ? [...a.evidence, evidence] : a.evidence,
-                    }
-                  : a
-              ),
-            }
-          : current
-      );
+      // Re-read the case so the server remains the source of truth and all
+      // dependent actions are recalculated after this state change.
+      const refreshed = await fetch(`/api/cases/${id}`);
+      if (!refreshed.ok) {
+        setError("The action changed, but the case could not be refreshed.");
+        return;
+      }
+      setItem(await refreshed.json());
     },
     [id]
   );
@@ -293,7 +284,7 @@ export default function CasePage() {
         </div>
       ) : (
         /* Graph view */
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
           {/* Canvas */}
           <div
             className="flex-1"
@@ -310,7 +301,7 @@ export default function CasePage() {
 
           {/* Detail panel */}
           {selectedAction && (
-            <div className="w-80 shrink-0 overflow-y-auto">
+            <div className="min-h-80 w-full shrink-0 overflow-y-auto lg:min-h-0 lg:w-80">
               <ActionDetailPanel
                 action={selectedAction}
                 caseItem={item}
