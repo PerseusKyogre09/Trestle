@@ -106,7 +106,10 @@ export class ExecutionController {
         );
       }
 
-      if (action.status === "in_progress") {
+      if (
+        action.status === "in_progress" &&
+        (action.executionAttempts?.length ?? 0) > 0
+      ) {
         throw new ExecutionControllerError(
           "Action already has an execution in progress or requires manual reconciliation.",
           409,

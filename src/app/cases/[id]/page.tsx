@@ -70,6 +70,12 @@ export default function CasePage() {
   const [executingActionId, setExecutingActionId] = useState<string | null>(
     null,
   );
+  const [researchJurisdiction, setResearchJurisdiction] = useState(
+    "India",
+  );
+  const [researchDocumentType, setResearchDocumentType] = useState(
+    "Indian driving licence",
+  );
 
   // Execution history modal
   const [historyAction, setHistoryAction] = useState<Action | null>(null);
@@ -171,7 +177,7 @@ export default function CasePage() {
       setPrepPayloadStr(
         JSON.stringify(
           {
-            cardIssuer: "Sample Bank UK",
+            cardIssuer: "Sample Indian Bank",
             cardType: "Debit",
             cardEnding: "4321",
             freezeReason: "Lost wallet",
@@ -188,8 +194,8 @@ export default function CasePage() {
       setPrepPayloadStr(
         JSON.stringify(
           {
-            jurisdiction: "UK",
-            documentType: "Driving Licence",
+            jurisdiction: "India",
+            documentType: "Indian driving licence",
             declarationConfirmed: false,
             applicantName: "Sample Holder",
           },
@@ -317,7 +323,7 @@ export default function CasePage() {
       if (latestApproved) {
         try {
           operation = {
-            operationType: "final_action_completion",
+            operationType: latestApproved.operationType,
             description: latestApproved.operationDescription,
             destination: latestApproved.destination ?? undefined,
             payload: JSON.parse(latestApproved.payload) as Record<
@@ -358,6 +364,71 @@ export default function CasePage() {
       setError(e instanceof Error ? e.message : "Execution failed");
     } finally {
       setExecutingActionId(null);
+    }
+  };
+
+  const executeTinyFishResearch = async (action: Action) => {
+    setExecutingActionId(action.id);
+    setFeedback("");
+    setError("");
+
+    const operation = {
+      operationType: "lost_document_research",
+      description: "Research the official lost-document replacement process.",
+      payload: {
+        jurisdiction: researchJurisdiction,
+        documentType: researchDocumentType,
+      },
+    };
+
+    try {
+      const res = await fetch(`/api/cases/${id}/actions/${action.id}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation, provider: "tinyfish" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setFeedback(
+        data.outcome === "uncertain"
+          ? `TinyFish finished inconclusively: ${data.uncertaintyReason || "manual review required"}`
+          : `TinyFish research finished: ${data.resultSummary}`,
+      );
+      await refreshData();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "TinyFish execution failed");
+    } finally {
+      setExecutingActionId(null);
+    }
+  };
+
+  const requestTinyFishApproval = async (action: Action) => {
+    setSubmittingReq(true);
+    setFeedback("");
+    setError("");
+    try {
+      const res = await fetch(`/api/cases/${id}/actions/${action.id}/approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operation: {
+            operationType: "lost_document_research",
+            description: "Research the official lost-document replacement process.",
+            payload: {
+              jurisdiction: researchJurisdiction,
+              documentType: researchDocumentType,
+            },
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setFeedback("Live TinyFish research approval requested.");
+      await refreshData();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to request approval");
+    } finally {
+      setSubmittingReq(false);
     }
   };
 
@@ -409,6 +480,24 @@ export default function CasePage() {
     item.actions.filter((a) => a.status === status).length;
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
 
+  const resetDemoCase = async () => {
+    if (!window.confirm("Reset this demo case to 0/5 and clear its history?")) {
+      return;
+    }
+
+    setError("");
+    setFeedback("");
+    const response = await fetch(`/api/cases/${id}/reset`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+      setError(data.error ?? "Unable to reset demo case.");
+      return;
+    }
+
+    setFeedback("Demo case reset to 0/5. Execution history and approvals were cleared.");
+    await refreshData();
+  };
+
   return (
     <main className="flex min-h-screen flex-col">
       {/* ── Page header ─────────────────────────────────────────────── */}
@@ -416,6 +505,13 @@ export default function CasePage() {
         <Link href="/" className="text-sm text-blue-300 hover:underline">
           ← All cases
         </Link>
+        <button
+          type="button"
+          onClick={resetDemoCase}
+          className="float-right rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-amber-400/60 hover:text-amber-200"
+        >
+          Reset demo to 0/5
+        </button>
 
         {/* Global Alerts / Feedback */}
         {feedback && (
@@ -666,9 +762,44 @@ export default function CasePage() {
                           >
                             {executingActionId === action.id
                               ? "Executing…"
-                              : "Execute via Mock Provider"}
+                              : "Complete via Mock Provider"}
                           </button>
                         )}
+
+                        {action.id === "identify-reporting" &&
+                          !isBlocked &&
+                          !actionApprovals.some((approval) =>
+                            approval.status === "pending" &&
+                            approval.operationType === "lost_document_research"
+                          ) &&
+                          !actionApprovals.some((approval) =>
+                            approval.status === "approved" &&
+                            approval.operationType === "lost_document_research"
+                          ) && (
+                            <button
+                              onClick={() => requestTinyFishApproval(action)}
+                              disabled={submittingReq}
+                              className="rounded-md border border-cyan-400/50 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/40 disabled:opacity-50"
+                            >
+                              Request LIVE TinyFish approval
+                            </button>
+                          )}
+
+                        {action.id === "identify-reporting" &&
+                          actionApprovals.some((approval) =>
+                            approval.status === "approved" &&
+                            approval.operationType === "lost_document_research"
+                          ) && (
+                            <button
+                              onClick={() => executeTinyFishResearch(action)}
+                              disabled={executingActionId === action.id}
+                              className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
+                            >
+                              {executingActionId === action.id
+                                ? "Running LIVE TinyFish…"
+                                : "Run LIVE TinyFish research"}
+                            </button>
+                          )}
 
                         {/* History Button */}
                         <button
@@ -697,6 +828,35 @@ export default function CasePage() {
                           before automated execution is permitted.
                         </div>
                       )}
+
+                    {action.id === "identify-reporting" && (
+                      <div className="mt-4 rounded border border-cyan-900/60 bg-cyan-950/20 p-3 text-xs text-cyan-100">
+                        <strong>Live research inputs:</strong>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <label>
+                            Jurisdiction
+                            <input
+                              value={researchJurisdiction}
+                              onChange={(event) =>
+                                setResearchJurisdiction(event.target.value)}
+                              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-200"
+                            />
+                          </label>
+                          <label>
+                            Document type
+                            <input
+                              value={researchDocumentType}
+                              onChange={(event) =>
+                                setResearchDocumentType(event.target.value)}
+                              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-200"
+                            />
+                          </label>
+                        </div>
+                        <p className="mt-2 text-cyan-300">
+                          Read-only official guidance research. No forms, payments, uploads, or account changes.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Action Metadata Grid */}
                     <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4 text-sm sm:grid-cols-3">

@@ -13,7 +13,7 @@ This repository contains:
 - **SQLite persistence with Prisma**: Persistent storage of cases, actions, approvals, and execution attempt audit trails (`src/server/repository.ts`, `prisma/schema.prisma`).
 - **Case management & approval UI**: Interactive case dashboard, approval review panel, operation preparation modal, graph/list views, and execution audit history (`src/app/cases/[id]/page.tsx`).
 
-*Planned integrations*: LLM-assisted workflow compilation, multi-user authentication/RBAC, and a real TinyFish browser automation adapter.
+*Planned integrations*: LLM-assisted workflow compilation, multi-user authentication/RBAC, and broader TinyFish browser automation. The current TinyFish adapter is intentionally limited to opt-in, read-only lost-document research.
 
 ---
 
@@ -148,37 +148,18 @@ The central `ExecutionController` (`src/server/execution/controller.ts`):
 
 ---
 
-### 6. Integrating a Future TinyFish Adapter
+### 6. TinyFish lost-document research (optional)
 
-When TinyFish integration is ready, add an adapter adhering to the provider interface:
+The repository includes an opt-in TinyFish provider for the `identify-reporting` action. India is the default demo jurisdiction, and the provider researches Indian government or issuing-authority guidance for documents such as an Indian driving licence. The jurisdiction and document type remain editable. It never submits applications, uploads documents, changes accounts, pays fees, or marks the action completed. Configure it locally with:
 
-```typescript
-// src/server/execution/tinyfishProvider.ts (Planned)
-import type { ExecutionProvider, ExecutionContext, ProviderExecutionResult } from "./types";
-
-export class TinyFishExecutionProvider implements ExecutionProvider {
-  public readonly name = "tinyfish";
-
-  async checkEligibility(context: ExecutionContext) {
-    // Verify TinyFish API key and browser automation feasibility
-    return { eligible: true, supportsOperation: true };
-  }
-
-  async execute(context: ExecutionContext): Promise<ProviderExecutionResult> {
-    // 1. Invoke TinyFish browser automation session
-    // 2. Perform authorised navigation and form population
-    // 3. Collect screenshots, DOM state, and network receipts as evidence
-    // 4. Return structured outcome
-  }
-
-  async getStatus(attemptId: string) { /* ... */ }
-}
-
-// Register in registry:
-// providerRegistry.register(new TinyFishExecutionProvider());
+```bash
+cp .env.example .env.local
+# Set TINYFISH_API_KEY in .env.local only; never commit this file.
 ```
 
-Because the execution controller manages approvals, concurrency, and policy independently of provider implementations, adding TinyFish requires zero changes to the core approval lifecycle.
+The mock provider remains the default. A live run requires a separate approval for the exact jurisdiction, document type, and research operation. The local app currently has no authentication or multi-user authorization, so keep live use to a local demo.
+
+The implementation lives in `src/server/execution/tinyfishProvider.ts` and is registered beside the mock provider. Because the execution controller manages approvals, concurrency, and policy independently of provider implementations, the adapter uses the existing approval lifecycle and execution history.
 
 ---
 

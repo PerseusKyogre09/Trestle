@@ -1,4 +1,5 @@
 import { MockExecutionProvider } from "./mockProvider";
+import { TinyFishExecutionProvider } from "./tinyfishProvider";
 import type { ExecutionProvider } from "./types";
 
 class ExecutionProviderRegistry {
@@ -8,6 +9,7 @@ class ExecutionProviderRegistry {
   constructor() {
     const mock = new MockExecutionProvider();
     this.register(mock);
+    this.register(new TinyFishExecutionProvider());
     this.defaultProviderName = mock.name;
   }
 

@@ -67,6 +67,68 @@ function Value({ children }: { children: React.ReactNode }) {
   return <p className="mt-1 text-sm text-slate-300">{children}</p>;
 }
 
+function sourceUrls(resultDetails: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(resultDetails);
+    if (!parsed || typeof parsed !== "object") return [];
+    const urls = (parsed as { sourceUrls?: unknown }).sourceUrls;
+    return Array.isArray(urls)
+      ? urls.filter(
+        (url): url is string =>
+          typeof url === "string" &&
+          (url.startsWith("https://") || url.startsWith("http://")),
+      )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function researchResult(resultDetails: string): {
+  summary?: string;
+  sourceUrls: string[];
+  requirements: string[];
+  requiredDocuments: string[];
+  fees: string[];
+  nextSteps: string[];
+  unknowns: string[];
+} | null {
+  try {
+    const parsed: unknown = JSON.parse(resultDetails);
+    if (!parsed || typeof parsed !== "object") return null;
+    const value = parsed as Record<string, unknown>;
+    const list = (key: string) =>
+      Array.isArray(value[key])
+        ? value[key].filter((item): item is string => typeof item === "string")
+        : [];
+    return {
+      summary: typeof value.summary === "string" ? value.summary : undefined,
+      sourceUrls: sourceUrls(resultDetails),
+      requirements: list("requirements"),
+      requiredDocuments: list("requiredDocuments"),
+      fees: list("fees"),
+      nextSteps: list("nextSteps"),
+      unknowns: list("unknowns"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ResearchList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {title}
+      </p>
+      <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-300">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 export default function ActionDetailPanel(
   { action, caseItem, onClose, onTransition }: Props,
 ) {
@@ -74,10 +136,17 @@ export default function ActionDetailPanel(
   const [executions, setExecutions] = useState<ExecutionAttempt[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [jurisdiction, setJurisdiction] = useState("India");
+  const [documentType, setDocumentType] = useState("Indian driving licence");
   const operation: ProposedOperation = {
     operationType: "complete_action",
     description: action.description,
     payload: { actionId: action.id },
+  };
+  const liveOperation: ProposedOperation = {
+    operationType: "lost_document_research",
+    description: "Research the official lost-document replacement process.",
+    payload: { jurisdiction, documentType },
   };
 
   useEffect(() => {
@@ -156,6 +225,56 @@ export default function ActionDetailPanel(
     }
     setExecutions(await historyResponse.json());
     window.location.reload();
+  }
+
+  async function requestLiveApproval() {
+    setBusy(true);
+    setMessage("");
+    const response = await fetch(
+      `/api/cases/${caseItem.id}/actions/${action.id}/approval`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operation: liveOperation }),
+      },
+    );
+    const data = await response.json();
+    setBusy(false);
+    if (!response.ok) return setMessage(data.error);
+    setApprovals((current) => [data, ...current]);
+  }
+
+  async function executeLive() {
+    const approved = approvals.find(
+      (item) =>
+        item.status === "approved" &&
+        item.operationType === liveOperation.operationType,
+    );
+    if (!approved) return setMessage("Approve the live research operation first.");
+    setBusy(true);
+    setMessage("");
+    const response = await fetch(
+      `/api/cases/${caseItem.id}/actions/${action.id}/execute`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: liveOperation,
+          provider: "tinyfish",
+        }),
+      },
+    );
+    const data = await response.json();
+    setBusy(false);
+    if (!response.ok) return setMessage(data.error);
+    const historyResponse = await fetch(
+      `/api/cases/${caseItem.id}/actions/${action.id}/executions`,
+    );
+    if (historyResponse.ok) setExecutions(await historyResponse.json());
+    else setMessage("Research finished, but execution history could not be loaded.");
+    if (data.outcome === "uncertain") {
+      setMessage(data.uncertaintyReason ?? "TinyFish returned an inconclusive result.");
+    }
   }
   const blockedBy = action.dependencies.filter(
     (d) => caseItem.actions.find((a) => a.id === d)?.status !== "completed",
@@ -354,12 +473,21 @@ export default function ActionDetailPanel(
           )}
           {isInProgress && (
             <>
-              <button
-                onClick={() => onTransition(action, "completed")}
-                className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-              >
-                Complete
-              </button>
+              {action.approvalRequired
+                ? (
+                  <p className="rounded-md border border-orange-400/20 bg-orange-400/5 p-2 text-xs leading-5 text-orange-200">
+                    This action requires approval. Use the approved execution
+                    control to complete it with recorded evidence.
+                  </p>
+                )
+                : (
+                  <button
+                    onClick={() => onTransition(action, "completed")}
+                    className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+                  >
+                    Complete with evidence
+                  </button>
+                )}
               <button
                 onClick={() => onTransition(action, "failed")}
                 className="rounded-md border border-rose-400/40 px-3 py-2 text-sm text-rose-300 hover:border-rose-400/70"
@@ -500,8 +628,164 @@ export default function ActionDetailPanel(
                     Evidence: simulated only — no external completion claimed.
                   </p>
                 )}
+                {execution.resultDetails && !execution.isSimulated && (
+                  <div className="mt-2 rounded bg-slate-950/60 p-2 text-slate-400">
+                    <p className="mb-1 text-[11px] uppercase tracking-wide text-blue-300">
+                      LIVE TINYFISH research result
+                    </p>
+                    {researchResult(execution.resultDetails) ? (
+                      <div className="space-y-3">
+                        {researchResult(execution.resultDetails)!.summary && (
+                          <p className="text-sm leading-5 text-slate-200">
+                            {researchResult(execution.resultDetails)!.summary}
+                          </p>
+                        )}
+                        <ResearchList
+                          title="What the official guidance requires"
+                          items={researchResult(execution.resultDetails)!.requirements}
+                        />
+                        <ResearchList
+                          title="Documents to prepare"
+                          items={researchResult(execution.resultDetails)!.requiredDocuments}
+                        />
+                        <ResearchList
+                          title="Published fees"
+                          items={researchResult(execution.resultDetails)!.fees}
+                        />
+                        <ResearchList
+                          title="Next steps"
+                          items={researchResult(execution.resultDetails)!.nextSteps}
+                        />
+                        <ResearchList
+                          title="Needs verification"
+                          items={researchResult(execution.resultDetails)!.unknowns}
+                        />
+                        {researchResult(execution.resultDetails)!.sourceUrls.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                              Official sources
+                            </p>
+                            {researchResult(execution.resultDetails)!.sourceUrls.map((url) => (
+                          <a
+                            key={url}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block break-all text-cyan-300 underline hover:text-cyan-200"
+                          >
+                            {url}
+                          </a>
+                            ))}
+                          </div>
+                        )}
+                        <p className="border-t border-slate-800 pt-2 text-[11px] text-amber-300">
+                          Research only: no application was submitted and no replacement was completed.
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400">
+                        The provider returned a result that could not be displayed safely.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
+        {action.id === "identify-reporting" && (
+          <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
+            <Label>Live TinyFish research</Label>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              This researches official guidance only. It does not submit an application,
+              upload documents, pay fees, or claim replacement completion.
+            </p>
+            <div className="mt-3 grid gap-2">
+              <label className="text-xs text-slate-400">
+                Jurisdiction
+                <input
+                  value={jurisdiction}
+                  onChange={(event) => setJurisdiction(event.target.value)}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200"
+                />
+              </label>
+              <label className="text-xs text-slate-400">
+                Document type
+                <input
+                  value={documentType}
+                  onChange={(event) => setDocumentType(event.target.value)}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200"
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] text-cyan-300">
+              LIVE TINYFISH · requires a separate approval for this exact research operation
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {!approvals.some((item) =>
+                ["pending", "approved"].includes(item.status) &&
+                item.operationType === "lost_document_research"
+              ) && (
+                <button
+                  disabled={busy || !jurisdiction.trim() || !documentType.trim()}
+                  onClick={requestLiveApproval}
+                  className="rounded-md border border-cyan-400/40 px-3 py-2 text-sm text-cyan-200 disabled:opacity-50"
+                >
+                  Request live research approval
+                </button>
+              )}
+              {approvals.find(
+                (item) =>
+                  item.status === "pending" &&
+                  item.operationType === "lost_document_research",
+              ) && (
+                <>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      decide(
+                        approvals.find(
+                          (item) =>
+                            item.status === "pending" &&
+                            item.operationType === "lost_document_research",
+                        )!.id,
+                        "approve",
+                      )}
+                    className="rounded-md bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+                  >
+                    Approve live research
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      decide(
+                        approvals.find(
+                          (item) =>
+                            item.status === "pending" &&
+                            item.operationType === "lost_document_research",
+                        )!.id,
+                        "reject",
+                      )}
+                    className="rounded-md border border-rose-400/40 px-3 py-2 text-sm text-rose-300 disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </>
+              )}
+              {approvals.some(
+                (item) =>
+                  item.status === "approved" &&
+                  item.operationType === "lost_document_research",
+              ) && (
+                <button
+                  disabled={busy}
+                  onClick={executeLive}
+                  className="rounded-md bg-cyan-600 px-3 py-2 text-sm text-white disabled:opacity-50"
+                >
+                  Run LIVE TINYFISH research
+                </button>
+              )}
+            </div>
           </div>
         )}
         {message && (

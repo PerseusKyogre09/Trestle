@@ -317,7 +317,7 @@ export async function claimActionForExecution(
     where: {
       id: actionId,
       caseId,
-      status: { in: ["pending", "ready", "awaiting_approval"] },
+      status: { in: ["pending", "ready", "awaiting_approval", "in_progress"] },
     },
     data: { status: "in_progress" },
   });
@@ -390,4 +390,21 @@ export async function getExecutionAttemptsByActionId(
     orderBy: { startedAt: "desc" },
   });
   return attempts.map(mapExecutionAttempt);
+}
+
+export async function resetCaseForDemo(caseId: string): Promise<boolean> {
+  const result = await prisma.$transaction(async (transaction) => {
+    const existing = await transaction.case.findUnique({ where: { id: caseId } });
+    if (!existing) return false;
+
+    await transaction.executionAttempt.deleteMany({ where: { caseId } });
+    await transaction.approval.deleteMany({ where: { caseId } });
+    await transaction.action.updateMany({
+      where: { caseId },
+      data: { status: "pending", evidence: "[]" },
+    });
+    return true;
+  });
+
+  return result;
 }

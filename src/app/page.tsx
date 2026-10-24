@@ -57,7 +57,7 @@ export default function Home() {
             id="event"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="I lost my wallet containing my debit card and driving licence."
+            placeholder="I lost my wallet containing my debit card and Indian driving licence."
             className="mt-4 min-h-40 w-full rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 outline-none ring-blue-400 placeholder:text-slate-600 focus:ring-2"
           />
           <button
