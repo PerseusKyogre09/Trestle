@@ -48,7 +48,16 @@ vi.mock("server-only", () => ({}));
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) }));
 vi.mock("./db", () => ({ prisma: { sharedBrowserSession: database } }));
 vi.mock("./repository", () => ({
-  getCase: vi.fn(async () => ({
+  getCase: vi.fn(async (id: string) => id === "case-spam" || id === "case-spam-ucc" ? ({
+    id: "case-spam",
+    title: "Spam number reporting demo",
+    description: "Use the correct official reporting route.",
+    originalInput: "Unwanted call or message from an unknown number.",
+    actions: [
+      { id: "classify-reporting-route", caseId: id, sequence: 0, title: "Choose route", description: "Classify the contact.", status: "completed", priority: "medium", dependencies: [], requiredInputs: [], riskLevel: "low", approvalRequired: false, successCriteria: [], evidence: [{ kind: "user_provided", note: id === "case-spam-ucc" ? "User reports: Route: Ordinary unsolicited commercial communication (UCC/spam)" : "User reports: Route: Suspected cybercrime or impersonation attempt", recordedAt: "2026-01-01T00:00:00.000Z" }], executionMode: "manual", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "research-reporting-route", caseId: "case-spam", sequence: 1, title: "Research official reporting route", description: "Research public guidance.", status: "ready", priority: "medium", dependencies: ["classify-reporting-route"], requiredInputs: [], riskLevel: "low", approvalRequired: false, successCriteria: [], evidence: [], executionMode: "assisted", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ],
+  }) : ({
     id: "case-real",
     title: "Lost credit card",
     description: "Find safe next steps.",
@@ -67,6 +76,7 @@ class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   static sentMethods: Array<{ method: string; params: Record<string, unknown> }> = [];
   static omitInitialPageTarget = false;
+  static currentUrl = "https://the-internet.herokuapp.com/inputs";
   private listeners = new Map<string, Array<(event: { data?: unknown }) => void>>();
 
   constructor(readonly url: string) {
@@ -94,10 +104,14 @@ class FakeWebSocket {
       result = { cssVisualViewport: { clientWidth: 1280, clientHeight: 720 } };
     } else if (request.method === "Page.captureScreenshot") {
       result = { data: Buffer.from("actual-frame-bytes").toString("base64") };
+    } else if (request.method === "Page.navigate") {
+      FakeWebSocket.currentUrl = String(request.params.url);
     } else if (request.method === "Runtime.evaluate") {
       const expression = String(request.params.expression ?? "");
-      const value = expression.includes("location.href")
-        ? JSON.stringify({ url: "https://the-internet.herokuapp.com/inputs", title: "Inputs" })
+      const value = expression.includes("requiredControlCount")
+        ? JSON.stringify({ formCount: 1, requiredControlCount: 3, captchaPresent: true })
+        : expression.includes("location.href")
+        ? JSON.stringify({ url: FakeWebSocket.currentUrl, title: new URL(FakeWebSocket.currentUrl).hostname })
         : expression.includes("input[type=number]")
         ? "41"
         : "";
@@ -137,6 +151,7 @@ describe("TinyFish shared browser proof of concept", () => {
     FakeWebSocket.instances = [];
     FakeWebSocket.sentMethods = [];
     FakeWebSocket.omitInitialPageTarget = false;
+    FakeWebSocket.currentUrl = "https://the-internet.herokuapp.com/inputs";
     vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
       session_id: "tinyfish-session-1",
@@ -257,6 +272,65 @@ describe("TinyFish shared browser proof of concept", () => {
     expect(snapshot.selectedUrl).toBe("https://www.icici.bank.in/personal-banking/cards/credit-card/block-credit-card");
     expect(FakeWebSocket.sentMethods.some((item) => item.method === "Page.navigate" && item.params.url === snapshot.selectedUrl)).toBe(true);
     expect(snapshot.controlOwner).toBe("user");
+  });
+
+  it("opens a spam-report route under TRESTLE control and checks only form structure on handback", async () => {
+    const browser = await import("./sharedBrowser");
+    const started = await browser.startOrReconnectSharedBrowser("case-spam");
+    expect(started.controlOwner).toBe("agent");
+    expect(started.selectedUrl).toBe("https://cybercrime.gov.in/webform/cyber_suspect.aspx");
+
+    await browser.takeSharedBrowserControl("case-spam", "user");
+    const beforeHandback = FakeWebSocket.sentMethods.length;
+    const handback = await browser.continueSharedBrowserWithAgent("case-spam");
+
+    expect(handback.snapshot.providerSessionId).toBe(started.providerSessionId);
+    expect(handback.snapshot.controlOwner).toBe("agent");
+    expect(handback.message).toContain("3 required control(s)");
+    expect(handback.message).toContain("CAPTCHA element");
+    const agentCommands = FakeWebSocket.sentMethods.slice(beforeHandback);
+    expect(agentCommands.some((item) => item.method === "Runtime.evaluate" && String(item.params.expression).includes("requiredControlCount"))).toBe(true);
+    expect(agentCommands.some((item) => item.method.startsWith("Input.") || item.method === "Page.navigate")).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("opens TRAI's official complaint/report instructions under TRESTLE control without submitting anything", async () => {
+    const browser = await import("./sharedBrowser");
+    const started = await browser.startOrReconnectSharedBrowser("case-spam-ucc");
+
+    expect(started.controlOwner).toBe("agent");
+    expect(started.selectedUrl).toBe("https://trai.gov.in/complain-or-report-against-ucc");
+    expect(started.selectionReason).toContain("telecom provider");
+    expect(FakeWebSocket.currentUrl).toBe("https://trai.gov.in/complain-or-report-against-ucc");
+    expect(FakeWebSocket.sentMethods.some((item) => item.method === "Page.navigate" && item.params.url === started.selectedUrl)).toBe(true);
+
+    await browser.takeSharedBrowserControl("case-spam-ucc", "user");
+    const handback = await browser.continueSharedBrowserWithAgent("case-spam-ucc");
+
+    expect(handback.snapshot.controlOwner).toBe("agent");
+    expect(handback.message).toContain("official complaint/report instructions");
+    expect(handback.message).toContain("not a form hosted by TRAI");
+    expect(handback.message).toContain("nothing was submitted");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("automatically advances an existing TRESTLE-owned UCC session from /ucc to official complaint instructions", async () => {
+    const browser = await import("./sharedBrowser");
+    const started = await browser.startOrReconnectSharedBrowser("case-spam-ucc");
+    FakeWebSocket.currentUrl = "https://trai.gov.in/ucc";
+    const row = database.rows.get(started.sessionId);
+    expect(row).toBeDefined();
+    if (!row) return;
+    row.currentUrl = FakeWebSocket.currentUrl;
+
+    const advanced = await browser.advanceSharedBrowserUccGuide("case-spam-ucc");
+
+    expect(advanced.snapshot.providerSessionId).toBe(started.providerSessionId);
+    expect(advanced.snapshot.controlOwner).toBe("agent");
+    expect(advanced.snapshot.currentUrl).toBe("https://trai.gov.in/complain-or-report-against-ucc");
+    expect(FakeWebSocket.sentMethods.filter((item) => item.method === "Page.navigate")).toHaveLength(2);
+    expect(FakeWebSocket.sentMethods.filter((item) => item.method === "Page.navigate").at(-1)?.params.url).toBe("https://trai.gov.in/complain-or-report-against-ucc");
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
   it("refreshes a persisted official bank destination without creating a second remote session", async () => {

@@ -11,7 +11,7 @@ export type WebsiteSelection = {
   url: string;
   allowedDomain: string;
   institution: string | null;
-  source: "persisted_tinyfish_research" | "verified_issuer_directory" | "explicit_test_mode" | "development_custom_url";
+  source: "persisted_tinyfish_research" | "verified_issuer_directory" | "official_reporting_directory" | "explicit_test_mode" | "development_custom_url";
   reason: string;
 };
 
@@ -110,6 +110,29 @@ export function resolveCaseWebsite(input: {
 }): WebsiteResolution {
   const action = firstEligibleAction(input.caseItem.actions);
   if (!action) return { kind: "unavailable", message: "There is no eligible unfinished action in this case. Complete its prerequisites or review the workflow status.", actionId: null, actionTitle: null };
+
+  if (input.caseItem.actions.some((item) => item.id === "classify-reporting-route")) {
+    const classification = input.caseItem.actions.find((item) => item.id === "classify-reporting-route")?.evidence
+      .find((item) => item.kind === "user_provided")?.note.toLowerCase() ?? "";
+    const route = classification.includes("ordinary unsolicited")
+      ? { url: "https://trai.gov.in/complain-or-report-against-ucc", domain: "trai.gov.in", name: "Telecom Regulatory Authority of India", reason: "The user classified this as ordinary unsolicited commercial communication. This official TRAI page explains the difference between a complaint and a report and routes both through the user's telecom provider; a number alone does not prove wrongdoing." }
+      : classification.includes("suspected cybercrime")
+      ? { url: "https://cybercrime.gov.in/webform/cyber_suspect.aspx", domain: "cybercrime.gov.in", name: "National Cyber Crime Reporting Portal", reason: "The user described an attempted cybercrime or impersonation. Report Suspect accepts identifiers connected to attempted cybercrime; it is not a finding that the identifier committed an offense." }
+      : classification.includes("money lost")
+      ? { url: "https://cybercrime.gov.in/", domain: "cybercrime.gov.in", name: "National Cyber Crime Reporting Portal", reason: "The user reports financial loss. The portal directs victims to report immediately; 1930 is the national cyber-fraud helpline. This is separate from the Report Suspect repository." }
+      : null;
+    if (!route) return {
+      kind: "clarification",
+      actionId: action.id,
+      actionTitle: action.title,
+      message: "First classify what happened: ordinary unwanted promotion, a suspected impersonation/phishing attempt, or money already lost. TRESTLE will then select the appropriate official route; it will not infer wrongdoing from the number alone.",
+    };
+    return { kind: "selected", selection: {
+      actionId: action.id, actionTitle: action.title, url: route.url,
+      allowedDomain: route.domain, institution: route.name,
+      source: "official_reporting_directory", reason: route.reason,
+    } };
+  }
 
   const actionText = `${action.title} ${action.description}`.toLowerCase();
   const caseText = `${input.caseItem.title} ${input.caseItem.description} ${input.caseItem.originalInput}`;

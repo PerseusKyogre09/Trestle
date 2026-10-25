@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCase } from "../../../../../server/repository";
 import {
+  advanceSharedBrowserUccGuide,
   continueSharedBrowserWithAgent,
   endSharedBrowserSession,
   getSharedBrowserSnapshot,
@@ -23,6 +24,7 @@ const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("take-control") }).strict(),
   z.object({ action: z.literal("pause-agent") }).strict(),
   z.object({ action: z.literal("return-to-agent") }).strict(),
+  z.object({ action: z.literal("advance-ucc-guide") }).strict(),
   z.object({ action: z.literal("refresh-official-site") }).strict(),
   z.object({ action: z.literal("end") }).strict(),
   z.object({ action: z.literal("click"), x: z.number().finite(), y: z.number().finite() }).strict(),
@@ -81,11 +83,15 @@ export async function POST(
         testMode: command.testMode,
         developmentUrl: command.developmentUrl,
       });
-      return NextResponse.json({ ...snapshot, screenshot: null });
+      const message = snapshot.selectionSource === "official_reporting_directory"
+        ? "TRESTLE opened the selected official reporting page in this live TinyFish Browser session. Take control when you are ready to enter report details; TRESTLE will not submit the report."
+        : undefined;
+      return NextResponse.json({ ...snapshot, screenshot: null, ...(message ? { message } : {}) });
     }
     if (command.action === "take-control") return NextResponse.json(await takeSharedBrowserControl(id, "user"));
     if (command.action === "pause-agent") return NextResponse.json(await takeSharedBrowserControl(id, "paused"));
     if (command.action === "return-to-agent") return NextResponse.json(await continueSharedBrowserWithAgent(id));
+    if (command.action === "advance-ucc-guide") return NextResponse.json(await advanceSharedBrowserUccGuide(id));
     if (command.action === "refresh-official-site") return NextResponse.json(await refreshSharedBrowserOfficialSite(id));
     if (command.action === "end") return NextResponse.json(await endSharedBrowserSession(id));
     const { action: type, ...args } = command;

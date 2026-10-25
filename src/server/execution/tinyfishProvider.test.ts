@@ -187,6 +187,28 @@ describe("TinyFishExecutionProvider", () => {
     expect(eligibility.supportsOperation).toBe(false);
   });
 
+  it("researches spam reporting routes with generic context only", async () => {
+    process.env.TINYFISH_API_KEY = "test-key";
+    let requestBody = "";
+    const provider = new TinyFishExecutionProvider(async (_input, init) => {
+      requestBody = String(init?.body);
+      return responseFor(['data: {"type":"COMPLETE","status":"COMPLETED","result":{"summary":"Official route guidance","sourceUrls":["https://trai.gov.in/ucc","https://cybercrime.gov.in/webform/cyber_suspect.aspx"],"requirements":["Use the telecom provider route for UCC"],"nextSteps":["Use 1909 or DND options where applicable"]}}\n\n']);
+    });
+    const spamContext: ExecutionContext = {
+      caseId: "case-1", actionId: "research-reporting-route",
+      operation: { operationType: "public_reporting_research", description: "Research official Indian spam reporting guidance.", payload: { jurisdiction: "India", researchTask: "spam-reporting-guidance", personalDataIncluded: false } },
+    };
+    const result = await provider.execute(spamContext);
+    expect(result.status).toBe("succeeded");
+    expect(result.canVerifyOutcome).toBe(true);
+    const request = JSON.parse(requestBody) as { url: string; goal: string };
+    expect(new URL(request.url).searchParams.get("q")).toContain("site:trai.gov.in");
+    expect(request.goal).toContain("ordinary unsolicited commercial calls/SMS");
+    expect(requestBody).not.toContain("case-1");
+    expect(requestBody).not.toMatch(/\d{10}/);
+    expect(requestBody).not.toContain("phone number from case");
+  });
+
   it("rejects private research values before making an outbound request", async () => {
     process.env.TINYFISH_API_KEY = "test-key";
     let called = false;

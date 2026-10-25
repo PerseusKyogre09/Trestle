@@ -105,6 +105,9 @@ export default function WorkflowRunPanel({
   const [asking, setAsking] = useState(false);
   const [clockNow, setClockNow] = useState(0);
   const [userReport, setUserReport] = useState("");
+  const [spamRoute, setSpamRoute] = useState("");
+  const [confirmSpamReview, setConfirmSpamReview] = useState(false);
+  const isSpamReporting = actions.some((action) => action.id === "classify-reporting-route");
 
   const refreshRuns = useCallback(async () => {
     const response = await fetch(`/api/cases/${caseId}/workflow-runs`, { cache: "no-store" });
@@ -149,6 +152,17 @@ export default function WorkflowRunPanel({
     return () => window.clearInterval(timer);
   }, [isRunRunning]);
   const currentAction = actions.find((action) => action.id === run?.currentActionId);
+  const spamRouteEvidence = actions.find((action) => action.id === "classify-reporting-route")?.evidence.find((item) => item.kind === "user_provided")?.note.replace(/^User reports:\s*/i, "") ?? "";
+  const ordinaryUccRoute = spamRouteEvidence.toLowerCase().includes("ordinary unsolicited");
+  const spamIdentifierEvidence = actions.find((action) => action.id === "record-suspicious-identifier")?.evidence.find((item) => item.kind === "user_provided")?.note.replace(/^User reports:\s*/i, "") ?? "";
+  const spamDescriptionEvidence = actions.find((action) => action.id === "record-spam-details")?.evidence.find((item) => item.kind === "user_provided")?.note.replace(/^User reports:\s*/i, "") ?? "";
+  const spamStateEvidence = actions.find((action) => action.id === "record-reporting-state")?.evidence.find((item) => item.kind === "user_provided")?.note.replace(/^User reports:\s*/i, "") ?? "";
+  const spamEvidenceNote = actions.find((action) => action.id === "prepare-report-evidence")?.evidence.find((item) => item.kind === "user_provided")?.note.replace(/^User reports:\s*/i, "") ?? "";
+  const spamOfficialUrl = spamRouteEvidence.toLowerCase().includes("ordinary unsolicited")
+    ? "https://trai.gov.in/complain-or-report-against-ucc"
+    : spamRouteEvidence.toLowerCase().includes("money lost")
+    ? "https://cybercrime.gov.in/"
+    : "https://cybercrime.gov.in/webform/cyber_suspect.aspx";
   const waitingForUser = run?.status === "waiting_for_user" ||
     (latestGateEvent?.type === "WAITING_FOR_USER" && run?.status === "running");
   const waitingForApproval = run?.status === "waiting_for_approval" ||
@@ -191,7 +205,9 @@ export default function WorkflowRunPanel({
       const response = await fetch(`/api/cases/${caseId}/workflow-runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode, jurisdiction, documentType }),
+        body: JSON.stringify(isSpamReporting
+          ? { mode, jurisdiction: "India", documentType: "spam caller identifier" }
+          : { mode, jurisdiction, documentType }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not start workflow.");
@@ -275,10 +291,30 @@ export default function WorkflowRunPanel({
   }
 
   async function completeUserTask() {
-    if (!currentAction || !userReport.trim()) return;
+    if (!currentAction) return;
+    const report = currentAction.id === "classify-reporting-route"
+      ? spamRoute
+      : currentAction.id === "review-report-manually"
+      ? "I confirm I reviewed this exact report summary. I will submit it myself on the official site; TRESTLE did not submit it."
+      : currentAction.id === "record-reporting-state" && ordinaryUccRoute
+      ? "Not applicable: the selected ordinary UCC route does not require an incident State/UT in this workflow."
+      : userReport.trim();
+    if (!report.trim()) return;
+    if (currentAction.id === "classify-reporting-route" && spamRoute.toLowerCase().includes("money lost")) {
+      setError("This spam-identifier workflow is not for reporting a financial cybercrime victimization. Report immediately at the official National Cyber Crime Reporting Portal or call 1930; start a victim-reporting case for that process.");
+      return;
+    }
+    if (currentAction.id === "review-report-manually" && !confirmSpamReview) return;
+    if (currentAction.id === "prepare-report-evidence" && spamRouteEvidence.toLowerCase().includes("suspected cybercrime") && /\b(none|no evidence|unavailable|don't have)\b/i.test(userReport)) {
+      setError("The NCRP Report Suspect form requires supporting evidence. Keep a relevant screenshot or other accepted evidence ready, or stop here and do not submit.");
+      return;
+    }
     setBusy(true);
-    await onTransition(currentAction, "completed", userReport.trim());
+    setError("");
+    await onTransition(currentAction, "completed", report);
     setUserReport("");
+    setSpamRoute(currentAction.id === "review-report-manually" ? spamRoute : "");
+    setConfirmSpamReview(false);
     setBusy(false);
     await refreshRuns();
   }
@@ -334,7 +370,8 @@ export default function WorkflowRunPanel({
             >
               {busy ? "Starting…" : mode === "autonomous" ? "Start workflow" : "Start guided mode"}
             </button>
-            <span className="text-xs text-slate-500">Research context: {jurisdiction} · {documentType}</span>
+            {!isSpamReporting && <span className="text-xs text-slate-500">Research context: {jurisdiction} · {documentType}</span>}
+            {isSpamReporting && <span className="max-w-xl text-xs text-slate-400">Choose the reporting category first. TRESTLE will then open that route’s official page automatically in the live browser.</span>}
           </div>
         )
         : (
@@ -383,6 +420,15 @@ export default function WorkflowRunPanel({
 
       {error && <p role="alert" className="mt-4 rounded-lg border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">{error}</p>}
 
+      {run && isSpamReporting && (
+        <SharedBrowserPanel
+          caseId={caseId}
+          actions={actions}
+          isSpamReporting
+          workflowStarted={!['completed', 'failed', 'uncertain'].includes(run.status)}
+        />
+      )}
+
       {run && (
         <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
           <div className="space-y-4">
@@ -395,6 +441,7 @@ export default function WorkflowRunPanel({
                 <span>{run.mode === "autonomous" ? "AUTONOMOUS" : "GUIDED"} · {elapsed}s elapsed</span>
               </div>
               {currentAction && <p className="mt-3 text-sm font-medium text-slate-100">{currentAction.title}</p>}
+              {isSpamReporting && currentAction?.id === "research-reporting-route" && <p className="mt-2 rounded-lg border border-cyan-900 bg-cyan-950/30 p-3 text-sm text-cyan-100">This step is only checking public guidance. You do not need to enter the number in the browser; the next step will give you a private TRESTLE input field.</p>}
               {run.errorMessage && <p className="mt-2 text-sm text-rose-300">{run.errorMessage}</p>}
               {waitingForUser && currentAction && (
                 <div className="mt-4 rounded-xl border border-amber-700/70 bg-amber-950/30 p-4">
@@ -402,16 +449,50 @@ export default function WorkflowRunPanel({
                   <h3 className="mt-1 text-lg font-semibold text-amber-100">{currentAction.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-200">{currentAction.description}</p>
                   <p className="mt-2 text-sm text-slate-300"><strong>Completion means:</strong> {currentAction.successCriteria.join(" ")}</p>
-                  {currentAction.requiredInputs.length > 0 && <p className="mt-2 text-sm text-slate-300"><strong>Have ready:</strong> {currentAction.requiredInputs.join(", ")}. Do not enter card, account, or document numbers here.</p>}
+                  {currentAction.requiredInputs.length > 0 && <p className="mt-2 text-sm text-slate-300"><strong>Next information needed:</strong> {currentAction.requiredInputs.join(", ")}. These answers remain in the local case and are not sent to Groq; TinyFish receives generic research instructions only.</p>}
                   <p className="mt-2 text-xs text-amber-200">TRESTLE cannot perform this task with the configured real providers. Complete it yourself; no mock action will be presented as real.</p>
                   {currentAction.status !== "in_progress"
                     ? <button type="button" disabled={busy} onClick={() => void startUserTask()} className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Updating…" : "I’ll handle this step"}</button>
                     : (
                       <div className="mt-3 space-y-2">
-                        <label htmlFor={`user-report-${currentAction.id}`} className="block text-sm text-slate-200">After you finish, briefly note what you did</label>
-                        <textarea id={`user-report-${currentAction.id}`} value={userReport} onChange={(event) => setUserReport(event.target.value)} maxLength={500} rows={2} placeholder="For example: I contacted the card issuer and followed their instructions." className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-100 placeholder:text-slate-600" />
-                        <p className="text-xs text-slate-400">This stays in TRESTLE as your report. Avoid sensitive numbers; it is not independent verification.</p>
-                        <button type="button" disabled={busy || !userReport.trim()} onClick={() => void completeUserTask()} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : "Record my update and continue"}</button>
+                        {currentAction.id === "classify-reporting-route" ? (
+                          <fieldset className="space-y-2">
+                            <legend className="text-sm text-slate-200">Which best describes what happened?</legend>
+                            {[
+                              ["Route: Ordinary unsolicited commercial communication (UCC/spam)", "Ordinary unwanted promotion / UCC"],
+                              ["Route: Suspected cybercrime or impersonation attempt", "Suspected impersonation, phishing, or attempted cybercrime"],
+                              ["Route: Money lost or unauthorized financial transaction", "Money lost / unauthorized transaction"],
+                            ].map(([value, label]) => <label key={value} className="flex items-start gap-2 rounded-lg border border-slate-700 p-3 text-sm text-slate-200"><input type="radio" name="spam-route" value={value} checked={spamRoute === value} onChange={() => setSpamRoute(value)} className="mt-1" />{label}</label>)}
+                            <p className="text-xs text-amber-200">A 10-digit number alone does not establish that it is fraudulent. Choose based on what you actually observed.</p>
+                            {spamRoute.toLowerCase().includes("money lost") && <p className="text-sm text-rose-200">Stop this spam-number flow. For money already lost or an unauthorized transaction, report as a cybercrime victim at <a className="underline" href="https://cybercrime.gov.in/" target="_blank" rel="noreferrer">cybercrime.gov.in</a> or call <a className="underline" href="tel:1930">1930</a>.</p>}
+                          </fieldset>
+                        ) : (
+                          <>
+                            <label htmlFor={`user-report-${currentAction.id}`} className="block text-sm text-slate-200">{currentAction.id === "record-suspicious-identifier" ? "Enter the number or sender ID here in TRESTLE" : currentAction.id === "record-reporting-state" ? "Which State/UT did this happen in? For TRAI UCC, enter ‘Not applicable’ if the provider does not request it." : currentAction.id === "record-spam-details" ? "What happened? Include whether it was call/SMS and date/time if known" : currentAction.id === "prepare-report-evidence" ? "What relevant evidence do you have ready? Do not upload it here." : "After reviewing the official route, what did you do?"}</label>
+                            {currentAction.id === "record-suspicious-identifier" && <p className="text-xs leading-5 text-cyan-100">You do not need to type it into the browser. This answer is saved in this TRESTLE case and is not sent to Groq or TinyFish. The browser is only for public guidance; you choose what to enter on an official reporting channel.</p>}
+                            {currentAction.id === "record-reporting-state" && ordinaryUccRoute
+                              ? <p className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">Not needed for this selected route. TRAI UCC complaints are handled through your telecom provider.</p>
+                              : currentAction.id === "record-suspicious-identifier"
+                              ? <input id={`user-report-${currentAction.id}`} type="text" inputMode="tel" autoComplete="off" spellCheck={false} value={userReport} onChange={(event) => setUserReport(event.target.value)} maxLength={160} placeholder="Type the exact number or sender ID" className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-100 placeholder:text-slate-600" />
+                              : <textarea id={`user-report-${currentAction.id}`} value={userReport} onChange={(event) => setUserReport(event.target.value)} maxLength={500} rows={2} placeholder={currentAction.id === "record-reporting-state" ? "State/UT where it happened" : currentAction.id === "prepare-report-evidence" ? "For example: screenshot of the SMS saved for the official form; or evidence unavailable" : "Only facts you personally observed. Never include passwords, OTPs, or financial account details."} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-100 placeholder:text-slate-600" />}
+                            {currentAction.id === "record-suspicious-identifier" && ordinaryUccRoute && <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3 text-xs leading-5 text-slate-300"><p className="font-semibold text-slate-100">Other ways to report ordinary UCC</p><p className="mt-1">Use your telecom provider’s app or complaint site, call 1909, or use the TRAI DND app. <a href="https://trai.gov.in/complain-or-report-against-ucc" target="_blank" rel="noreferrer" className="text-cyan-300 underline">Read TRAI’s official complaint/report guidance</a>. TRESTLE will not submit it for you.</p></div>}
+                            {currentAction.id === "review-report-manually" && <div className="space-y-3 rounded-lg border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-100">
+                              <h4 className="font-semibold">Review this exact report before proceeding</h4>
+                              <dl className="grid gap-2 sm:grid-cols-[150px_1fr]">
+                                <dt className="text-amber-200">Your selected route</dt><dd>{spamRouteEvidence || "Not recorded"}</dd>
+                                <dt className="text-amber-200">Incident State/UT</dt><dd>{spamStateEvidence || "Not recorded"}</dd>
+                                <dt className="text-amber-200">Identifier supplied</dt><dd className="break-all">{spamIdentifierEvidence || "Not recorded"}</dd>
+                                <dt className="text-amber-200">Your description</dt><dd>{spamDescriptionEvidence || "Not recorded"}</dd>
+                                <dt className="text-amber-200">Evidence note</dt><dd>{spamEvidenceNote || "Not recorded; you must select any required file on the official portal."}</dd>
+                                <dt className="text-amber-200">Official destination</dt><dd><a href={spamOfficialUrl} target="_blank" rel="noreferrer" className="underline">{spamOfficialUrl}</a></dd>
+                              </dl>
+                              <p><strong>Submission is not automated in this demo.</strong> You must review and submit on the official site, select the required evidence there, complete CAPTCHA/authentication yourself, and check for a genuine acknowledgement. TRESTLE will not claim the report was filed.</p>
+                              <label className="flex items-start gap-2"><input type="checkbox" checked={confirmSpamReview} onChange={(event) => setConfirmSpamReview(event.target.checked)} className="mt-1" /><span>I have reviewed this exact summary and confirm it is ready for me to submit manually on the official site. This does not authorize TRESTLE to submit it.</span></label>
+                            </div>}
+                          </>
+                        )}
+                        <p className="text-xs text-slate-400">Saved as your report in this local case, not independently verified. Never enter passwords, OTPs, or credentials.</p>
+                        <button type="button" disabled={busy || (currentAction.id === "classify-reporting-route" ? !spamRoute : currentAction.id === "review-report-manually" ? !confirmSpamReview : currentAction.id === "record-reporting-state" && ordinaryUccRoute ? false : !userReport.trim())} onClick={() => void completeUserTask()} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Saving…" : currentAction.id === "classify-reporting-route" ? "Use this reporting route" : currentAction.id === "record-suspicious-identifier" ? "Save number and continue" : currentAction.id === "record-reporting-state" && ordinaryUccRoute ? "Continue · not required for this route" : currentAction.id === "review-report-manually" ? "Confirm review · submission remains manual" : "Record answer and continue"}</button>
                       </div>
                     )}
                 </div>
@@ -435,7 +516,7 @@ export default function WorkflowRunPanel({
                 </div>
               )}
               {run.status === "uncertain" && <p className="mt-2 text-sm text-violet-200">Review the latest attempt before continuing. TRESTLE will not retry the external run automatically.</p>}
-              {run.mode === "autonomous" && currentActionHasTinyFishHistory && (
+              {!isSpamReporting && run.mode === "autonomous" && currentActionHasTinyFishHistory && (
                 <div className="mt-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-cyan-300">LIVE TINYFISH browser preview · read-only</p>
                   {streamingUrl
@@ -476,7 +557,7 @@ export default function WorkflowRunPanel({
                 <h3 className="text-sm font-semibold text-cyan-100">Research result · LIVE TINYFISH{latestResearchAction ? ` · ${latestResearchAction.title}` : ""}</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-200">{researchSummary}</p>
                 {typeof latestResearch?.requestedUrl === "string" && (
-                  <p className="mt-3 text-xs text-slate-400">Requested start page: <a href={latestResearch.requestedUrl} target="_blank" rel="noreferrer" className="break-all text-cyan-300 underline">{latestResearch.requestedUrl}</a></p>
+                  <p className="mt-3 text-xs text-slate-400">Research search used (not a reporting destination): <span className="break-all">{latestResearch.requestedUrl}</span></p>
                 )}
                 {sourceUrls.length > 0 && (
                   <div className="mt-3">
@@ -488,6 +569,10 @@ export default function WorkflowRunPanel({
                     </li>)}
                     </ul>
                     {otherSourceUrls.length > 0 && <p className="mt-2 text-xs text-amber-200">These returned links are visible for review, but they do not count toward TRESTLE’s official-source verification.</p>}
+                    {isSpamReporting && <div className="mt-3 flex flex-wrap gap-2">
+                      <a href="https://trai.gov.in/complain-or-report-against-ucc" target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg border border-cyan-800 px-3 py-2 text-sm font-medium text-cyan-200 underline">Open TRAI official UCC guidance</a>
+                      <a href="https://cybercrime.gov.in/webform/cyber_suspect.aspx" target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 underline">Open cybercrime suspect-report page</a>
+                    </div>}
                   </div>
                 )}
                 <p className="mt-3 text-xs text-slate-400">Research findings do not mean an application was submitted, accepted, or completed.</p>
@@ -514,7 +599,13 @@ export default function WorkflowRunPanel({
           </aside>
         </div>
       )}
-      <SharedBrowserPanel caseId={caseId} actions={actions} />
+      {!isSpamReporting && (
+        <SharedBrowserPanel
+          caseId={caseId}
+          actions={actions}
+          workflowStarted={Boolean(run && !["completed", "failed", "uncertain"].includes(run.status))}
+        />
+      )}
     </section>
   );
 }

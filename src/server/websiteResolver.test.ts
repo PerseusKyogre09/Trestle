@@ -60,6 +60,30 @@ describe("case-aware official website selection", () => {
     if (result.kind === "clarification") expect(result.message).toContain("Which bank issued");
   });
 
+  it("routes ordinary UCC and suspected cybercrime to different official pages only after user classification", () => {
+    const routeAction = action({ id: "classify-reporting-route", sequence: 0, title: "Classify reporting route", description: "Choose the type." });
+    const before = resolveCaseWebsite({ caseItem: baseCase("Report spam caller", [routeAction]) });
+    expect(before.kind).toBe("clarification");
+    const nextAction = action({ id: "research-reporting-route", sequence: 1, title: "Research official route", description: "Find government guidance.", dependencies: ["classify-reporting-route"] });
+    const ordinary = resolveCaseWebsite({ caseItem: baseCase("Report spam caller", [{
+      ...routeAction,
+      status: "completed",
+      evidence: [{ kind: "user_provided", note: "User reports: Route: Ordinary unsolicited commercial communication (UCC/spam)", recordedAt: "2026-01-01T00:00:00.000Z" }],
+    }, nextAction]) });
+    const cyber = resolveCaseWebsite({ caseItem: baseCase("Report spam caller", [{
+      ...routeAction,
+      status: "completed",
+      evidence: [{ kind: "user_provided", note: "User reports: Route: Suspected cybercrime or impersonation attempt", recordedAt: "2026-01-01T00:00:00.000Z" }],
+    }, nextAction]) });
+    expect(ordinary.kind).toBe("selected");
+    expect(cyber.kind).toBe("selected");
+    if (ordinary.kind === "selected" && cyber.kind === "selected") {
+      expect(ordinary.selection.url).toBe("https://trai.gov.in/complain-or-report-against-ucc");
+      expect(cyber.selection.url).toBe("https://cybercrime.gov.in/webform/cyber_suspect.aspx");
+      expect(ordinary.selection.source).toBe("official_reporting_directory");
+    }
+  });
+
   it("distinguishes SBI Card from State Bank debit-card support", () => {
     const creditAction = action({ id: "credit", sequence: 0, title: "Replace credit card", description: "Find the card issuer's lost-card process." });
     const debitAction = action({ id: "debit", sequence: 0, title: "Replace debit card", description: "Find the bank's lost-card process." });
@@ -114,6 +138,9 @@ describe("case-aware official website selection", () => {
     expect(isAllowedCaseNavigation("https://127.0.0.1/", "parivahan.gov.in")).toBe(false);
     expect(isAllowedCaseNavigation("https://parivahan.gov.in@evil.example/", "parivahan.gov.in")).toBe(false);
     expect(isAllowedCaseNavigation("https://www.icici.bank.in/personal-banking/", "icici.bank.in")).toBe(true);
+    expect(isAllowedCaseNavigation("https://trai.gov.in/ucc", "trai.gov.in")).toBe(true);
+    expect(isAllowedCaseNavigation("https://cybercrime.gov.in/webform/cyber_suspect.aspx", "cybercrime.gov.in")).toBe(true);
+    expect(isAllowedCaseNavigation("https://cybercrime-gov.in/webform/cyber_suspect.aspx", "cybercrime.gov.in")).toBe(false);
     expect(isAllowedCaseNavigation("https://sbi.bank.in/web/faq-s/faq-atm-services", "sbi.co.in")).toBe(true);
     expect(isAllowedCaseNavigation("https://hdfc.bank.in/credit-cards/block-loststolen-card", "hdfcbank.com")).toBe(true);
     expect(isAllowedCaseNavigation("https://axis.bank.in/cards/credit-card", "axisbank.com")).toBe(true);

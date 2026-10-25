@@ -13,7 +13,14 @@ export async function POST(request: Request) {
   const brief = createPlanningBrief(parsed.data.originalInput);
   if (!brief.ok) return NextResponse.json({ error: brief.reason }, { status: 422 });
   if (brief.brief.eventType === "other") {
-    return NextResponse.json({ error: "This situation needs a generic category first. Try describing whether it involves moving, education, insurance, or a lost document." }, { status: 422 });
+    return NextResponse.json({ error: "This situation needs a generic category first. Try describing whether it involves moving, education, insurance, a lost document, or unwanted calls/messages." }, { status: 422 });
+  }
+
+  if (brief.brief.eventType === "spam_reporting") {
+    const workflow = fallbackWorkflowForBrief(brief.brief);
+    return workflow
+      ? NextResponse.json({ workflow, source: "deterministic-fallback" })
+      : NextResponse.json({ error: "No safe spam-report workflow is available." }, { status: 422 });
   }
 
   const aiPlan = await planWithGroq(brief.brief).catch(() => null);

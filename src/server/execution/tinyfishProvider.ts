@@ -86,7 +86,7 @@ function validHttpsUrls(value: unknown): string[] {
 }
 
 function officialAuthorityUrls(urls: string[]): string[] {
-  const officialDomains = ["gov.in", "nic.in", "gov.uk", "gov.au", "govt.nz", "canada.ca"];
+  const officialDomains = ["gov.in", "nic.in", "trai.gov.in", "gov.uk", "gov.au", "govt.nz", "canada.ca"];
   return urls.filter((candidate) => {
     try {
       const hostname = new URL(candidate).hostname.toLowerCase();
@@ -104,6 +104,15 @@ function researchGoal(
   jurisdiction: string,
   documentType: string,
 ): string {
+  if (researchTask === "spam-reporting-guidance") {
+    return [
+      "Using only official Indian government sources, explain the distinction between ordinary unsolicited commercial calls/SMS (UCC/spam) and phone numbers involved in attempted cybercrime.",
+      "For UCC, identify the subscriber's telecom service provider complaint route (including 1909/DND where currently published) and any timing or evidence requirements explicitly stated.",
+      "For suspected cybercrime, identify the National Cyber Crime Reporting Portal Report Suspect facility and what it accepts. Distinguish this from a victim complaint and from reports where money has already been lost.",
+      "Return structured JSON with summary, sourceUrls, requirements, requiredDocuments, fees, nextSteps, and unknowns. Cite only pages actually visited and do not invent URLs.",
+      "This is generic public research. Never request or include a phone number, personal details, form values, or evidence. Do not submit anything or claim a report was filed.",
+    ].join(" ");
+  }
   const taskGoal = researchTask === "identify-reporting"
     ? `Find whether official lost ${documentType} reporting is recommended or required in ${jurisdiction}, and identify the responsible official authority.`
     : `Find the official ${jurisdiction} requirements and process for replacing a lost ${documentType}.`;
@@ -128,10 +137,10 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
     if (!getTinyFishApiKey()) {
       return { eligible: false, supportsOperation: true, reason: "TINYFISH_API_KEY is not configured." };
     }
-    if (context.operation.operationType !== "lost_document_research") {
-      return { eligible: false, supportsOperation: false, reason: "TinyFish is enabled only for lost-document research." };
+    if (!["lost_document_research", "public_reporting_research"].includes(context.operation.operationType)) {
+      return { eligible: false, supportsOperation: false, reason: "TinyFish is enabled only for approved read-only public research." };
     }
-    if (!new Set(["identify-reporting", "replacement-requirements"]).has(String(context.operation.payload.researchTask))) {
+    if (!new Set(["identify-reporting", "replacement-requirements", "spam-reporting-guidance"]).has(String(context.operation.payload.researchTask))) {
       return { eligible: false, supportsOperation: false, reason: "TinyFish research task is not supported." };
     }
     return { eligible: true, supportsOperation: true };
@@ -142,15 +151,22 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
     const jurisdiction = typeof payload.jurisdiction === "string" ? payload.jurisdiction : "";
     const documentType = typeof payload.documentType === "string" ? payload.documentType : "";
     const researchTask = typeof payload.researchTask === "string" ? payload.researchTask : "";
+    const isSpamGuidance = context.operation.operationType === "public_reporting_research" && researchTask === "spam-reporting-guidance";
+    if (context.operation.operationType !== "lost_document_research" && !isSpamGuidance) {
+      throw new Error("TinyFish operation type is not supported.");
+    }
     const researchBrief = createResearchBrief(jurisdiction, documentType);
-    if (!researchBrief) {
+    if (!isSpamGuidance && !researchBrief) {
       throw new Error("TinyFish research requires generic, non-personal jurisdiction and document context.");
     }
-    if (!new Set(["identify-reporting", "replacement-requirements"]).has(researchTask)) {
+    if (!new Set(["identify-reporting", "replacement-requirements", "spam-reporting-guidance"]).has(researchTask)) {
       throw new Error("TinyFish research task is not supported.");
     }
 
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${jurisdiction} official replace lost ${documentType}`)}`;
+    const searchQuery = isSpamGuidance
+      ? "site:trai.gov.in UCC spam complaint 1909 site:cybercrime.gov.in report suspect phone number"
+      : `${jurisdiction} official replace lost ${documentType}`;
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
     const apiKey = getTinyFishApiKey();
     let response: Response;
     try {
@@ -159,7 +175,7 @@ export class TinyFishExecutionProvider implements ExecutionProvider {
         headers: { "content-type": "application/json", "X-API-Key": apiKey },
         body: JSON.stringify({
           url: searchUrl,
-          goal: researchGoal(researchTask, researchBrief.jurisdiction, researchBrief.documentType),
+          goal: researchGoal(researchTask, isSpamGuidance ? "India" : researchBrief!.jurisdiction, isSpamGuidance ? "spam call or SMS" : researchBrief!.documentType),
           browser_profile: "lite",
           agent_config: { max_duration_seconds: 180 },
           output_schema: {

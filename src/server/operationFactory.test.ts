@@ -38,4 +38,11 @@ describe("server operation factory", () => {
       documentType: "Aadhaar number 123456789012",
     })).toThrow(/generic/);
   });
+
+  it("builds generic spam-route research without the identifier", () => {
+    const operation = buildOperationForAction({ ...action, id: "research-reporting-route" } as Action);
+    expect(operation.operationType).toBe("public_reporting_research");
+    expect(operation.payload).toEqual({ jurisdiction: "India", researchTask: "spam-reporting-guidance", personalDataIncluded: false });
+    expect(JSON.stringify(operation)).not.toMatch(/\d{10}/);
+  });
 });

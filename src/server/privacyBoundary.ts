@@ -27,6 +27,8 @@ export function createPlanningBrief(input: string):
   const lower = text.toLowerCase();
   const eventType = lower.includes("wallet")
     ? "lost_wallet"
+    : /(spam|unsolicited|scam call|spam caller|suspicious number|report.*number)/i.test(text)
+    ? "spam_reporting"
     : lower.includes("lost") && (lower.includes("licen") || lower.includes("document"))
     ? "lost_document"
     : lower.includes("mov") || lower.includes("relocat")
@@ -35,7 +37,7 @@ export function createPlanningBrief(input: string):
     ? "education_application"
     : lower.includes("insurance") || lower.includes("claim")
     ? "insurance_claim"
-    : "other";
+      : "other";
   const documentTypes = [
     "driving licence",
     "passport",

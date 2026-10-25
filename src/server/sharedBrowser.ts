@@ -321,6 +321,28 @@ class TinyFishCdp {
     }
   }
 
+  async inspectReportingForm(): Promise<{ formCount: number; requiredControlCount: number; captchaPresent: boolean }> {
+    const response = await this.send("Runtime.evaluate", {
+      expression: `JSON.stringify((() => ({
+        formCount: document.forms.length,
+        requiredControlCount: document.querySelectorAll('input[required], select[required], textarea[required], [aria-required="true"]').length,
+        captchaPresent: Boolean(document.querySelector('[id*="captcha" i], [class*="captcha" i], iframe[title*="captcha" i], iframe[src*="captcha" i]'))
+      }))())`,
+      returnByValue: true,
+    });
+    const value = (response.result as { value?: unknown } | undefined)?.value;
+    try {
+      const parsed = JSON.parse(String(value ?? "{}")) as Record<string, unknown>;
+      return {
+        formCount: typeof parsed.formCount === "number" ? parsed.formCount : 0,
+        requiredControlCount: typeof parsed.requiredControlCount === "number" ? parsed.requiredControlCount : 0,
+        captchaPresent: parsed.captchaPresent === true,
+      };
+    } catch {
+      throw new Error("The reporting page structure could not be checked safely.");
+    }
+  }
+
   async click(x: number, y: number): Promise<void> {
     // CDP preserves WebSocket message order. Sending these together avoids a
     // full remote round trip for every mouse phase while retaining press/release order.
@@ -551,7 +573,7 @@ export async function startOrReconnectSharedBrowser(caseId: string, options: { i
         providerSessionId: `pending-${localId}`,
         encryptedConnection: "pending",
         status: "connecting",
-        controlOwner: testMode ? "agent" : "user",
+        controlOwner: testMode || selection.source === "official_reporting_directory" ? "agent" : "user",
         selectedUrl: selection.url,
         selectionSource: selection.source,
         selectionReason: selection.reason,
@@ -793,7 +815,24 @@ export async function continueSharedBrowserWithAgent(caseId: string): Promise<{ 
   if (claimed.count !== 1) throw new Error("Take control in the browser before returning it to the agent.");
   let message: string;
   try {
-    if (!row.isTestMode) {
+    if (row.selectionSource === "official_reporting_directory" && !row.isTestMode) {
+      const cdp = connectionFor(row);
+      const metadata = await cdp.metadata();
+      const actualHost = metadata.currentUrl ? new URL(metadata.currentUrl).hostname.toLowerCase() : "";
+      if (!actualHost || !(actualHost === row.allowedDomain || actualHost.endsWith(`.${row.allowedDomain}`))) {
+        throw new Error("The current page is outside the selected official reporting domain. TRESTLE did not inspect it.");
+      }
+      const readiness = await cdp.inspectReportingForm();
+      const currentPath = metadata.currentUrl ? new URL(metadata.currentUrl).pathname.replace(/\/$/, "") : "";
+      message = actualHost === "trai.gov.in"
+        ? currentPath === "/complain-or-report-against-ucc"
+          ? "TRESTLE checked TRAI's official complaint/report instructions. This is not a form hosted by TRAI; it directs UCC complaints and reports through your telecom provider, including 1909 or an approved app. To open a provider-specific route, TRESTLE needs to know your mobile provider. No private data was read and nothing was submitted."
+          : "TRESTLE checked the official TRAI UCC page. It is guidance, not a complaint form; UCC complaints go through your telecom provider, 1909, or the DND app. No private data was read and nothing was submitted."
+        : readiness.formCount > 0
+        ? `TRESTLE checked the live reporting page on ${actualHost}. It found ${readiness.formCount} form(s), ${readiness.requiredControlCount} required control(s), and ${readiness.captchaPresent ? "a CAPTCHA element" : "no CAPTCHA element detected"}. It did not read any field values, change the page, or submit. TRESTLE has control now; take control again whenever you need to edit the page.`
+        : `TRESTLE checked the live official page on ${actualHost}. No web form was present on this page; it appears to be guidance only. It did not read private data or click anything. TRESTLE has control now; take control again whenever you need to edit the page.`;
+      await prisma.sharedBrowserSession.update({ where: { id: row.id }, data: { lastActivity: new Date().toISOString() } });
+    } else if (!row.isTestMode) {
       await prisma.sharedBrowserSession.update({ where: { id: row.id }, data: { controlOwner: "paused", lastActivity: new Date().toISOString() } });
       message = "Control handoff recorded. This TRESTLE version does not automate actions in this case browser; continue with the workflow manually. Authentication and consequential steps remain yours.";
     } else {
@@ -816,6 +855,64 @@ export async function continueSharedBrowserWithAgent(caseId: string): Promise<{ 
   const snapshot = await getSharedBrowserSnapshot(caseId);
   if (!snapshot) throw new Error("Shared browser session could not be reloaded.");
   return { snapshot, message };
+}
+
+/** Advance a TRESTLE-owned UCC session from the general TRAI landing page to
+ * the official complaint/report instructions, without reading or submitting
+ * any user data. */
+export async function advanceSharedBrowserUccGuide(caseId: string): Promise<{ snapshot: SharedBrowserSnapshot; message: string }> {
+  const row = await prisma.sharedBrowserSession.findFirst({ where: { caseId, activeLock: caseId, status: "active" } }) as BrowserSessionRecord | null;
+  if (!row) throw new Error("There is no active shared browser session.");
+  if (row.controlOwner !== "agent" || row.selectionSource !== "official_reporting_directory" || row.allowedDomain !== "trai.gov.in") {
+    throw new Error("TRESTLE can only advance its own verified TRAI UCC session.");
+  }
+  const targetUrl = "https://trai.gov.in/complain-or-report-against-ucc";
+  const cdp = connectionFor(row);
+  const before = await cdp.metadata();
+  const beforeUrl = before.currentUrl ? new URL(before.currentUrl) : null;
+  if (beforeUrl?.hostname.toLowerCase() === "trai.gov.in" && beforeUrl.pathname.replace(/\/$/, "") === "/complain-or-report-against-ucc") {
+    const snapshot = await getSharedBrowserSnapshot(caseId);
+    if (!snapshot) throw new Error("The shared browser session could not be reloaded.");
+    return { snapshot, message: "The shared browser is already on TRAI's official UCC complaint/report instructions." };
+  }
+  if (!beforeUrl || beforeUrl.hostname.toLowerCase() !== "trai.gov.in" || beforeUrl.pathname.replace(/\/$/, "") !== "/ucc") {
+    throw new Error("TRESTLE did not navigate because the current page is not the expected TRAI UCC landing page.");
+  }
+  const claimed = await prisma.sharedBrowserSession.updateMany({
+    where: { id: row.id, status: "active", controlOwner: "agent", commandClaimed: false },
+    data: { commandClaimed: true },
+  });
+  if (claimed.count !== 1) throw new Error("The browser is busy or control changed. Wait briefly and try again.");
+  try {
+    await cdp.navigate(targetUrl);
+    let metadata = await cdp.metadata();
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const landed = metadata.currentUrl ? new URL(metadata.currentUrl) : null;
+      if (landed?.hostname.toLowerCase() === "trai.gov.in" && landed.pathname.replace(/\/$/, "") === "/complain-or-report-against-ucc") break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      metadata = await cdp.metadata();
+    }
+    const landed = metadata.currentUrl ? new URL(metadata.currentUrl) : null;
+    if (landed?.hostname.toLowerCase() !== "trai.gov.in" || landed.pathname.replace(/\/$/, "") !== "/complain-or-report-against-ucc") {
+      throw new Error("TRAI's complaint/report instructions page did not finish loading. TRESTLE did not claim that it opened.");
+    }
+    const updated = await prisma.sharedBrowserSession.update({
+      where: { id: row.id },
+      data: {
+        currentUrl: metadata.currentUrl,
+        pageTitle: metadata.pageTitle,
+        selectedUrl: targetUrl,
+        selectionReason: "Official TRAI instructions explaining UCC complaints and reports and directing users to their telecom provider.",
+        lastActivity: new Date().toISOString(),
+      },
+    }) as BrowserSessionRecord;
+    return {
+      snapshot: { ...publicState(updated), screenshot: null, viewport: cdp.viewportSize() },
+      message: "TRESTLE opened TRAI's official complaint/report instructions in the same browser session. The page directs users to their telecom provider; TRESTLE needs that provider name before choosing a provider-specific site. No private values were read and nothing was submitted.",
+    };
+  } finally {
+    await releaseCommand(row.id);
+  }
 }
 
 export async function endSharedBrowserSession(caseId: string): Promise<SharedBrowserSnapshot> {

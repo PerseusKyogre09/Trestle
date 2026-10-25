@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { planWithGroq } from "./planner";
+import { fallbackWorkflowForBrief, planWithGroq } from "./planner";
 import type { PlanningBrief } from "./privacyBoundary";
 
 const brief: PlanningBrief = {
@@ -55,5 +55,17 @@ describe("Groq planning boundary", () => {
     };
     const plan = await planWithGroq(brief, async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(cyclic) } }] }), { status: 200 }));
     expect(plan).toBeNull();
+  });
+
+  it("creates a dedicated spam-report flow with a route-classification gate before research", () => {
+    const workflow = fallbackWorkflowForBrief({ ...brief, eventType: "spam_reporting", documentTypes: ["spam caller"] });
+    expect(workflow?.actions.map((action) => action.id)).toEqual([
+      "classify-reporting-route", "research-reporting-route", "record-suspicious-identifier", "record-reporting-state", "record-spam-details", "prepare-report-evidence", "review-report-manually",
+    ]);
+    expect(workflow?.actions[1].dependencies).toEqual(["classify-reporting-route"]);
+    expect(workflow?.actions[1].executionMode).toBe("assisted");
+    expect(workflow?.actions[2].dependencies).toEqual(["research-reporting-route"]);
+    expect(workflow?.actions[3].dependencies).toEqual(["record-suspicious-identifier"]);
+    expect(workflow?.actions[5].description).toContain("does not collect or upload the file");
   });
 });

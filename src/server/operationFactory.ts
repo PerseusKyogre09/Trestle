@@ -13,6 +13,14 @@ export function buildOperationForAction(
   action: Action,
   context: Record<string, unknown> = {},
 ): ProposedOperation {
+  if (action.id === "research-reporting-route") {
+    return {
+      operationType: "public_reporting_research",
+      description: "Research official Indian guidance distinguishing unsolicited commercial calls/SMS from suspected cybercrime reports.",
+      destination: "Official Government of India public guidance",
+      payload: { jurisdiction: "India", researchTask: "spam-reporting-guidance", personalDataIncluded: false },
+    };
+  }
   const researchTasks = new Set([
     "identify-reporting",
     "replacement-requirements",

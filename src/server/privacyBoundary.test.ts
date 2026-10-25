@@ -26,4 +26,14 @@ describe("provider privacy boundary", () => {
       documentType: "Indian driving licence",
     });
   });
+
+  it("classifies spam-report requests locally without retaining the number in the planning brief", () => {
+    const result = createPlanningBrief("I received an unwanted spam caller and need the official Indian reporting route.");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.brief.eventType).toBe("spam_reporting");
+      expect(JSON.stringify(result.brief)).not.toContain("caller");
+      expect(JSON.stringify(result.brief)).not.toMatch(/\d{10}/);
+    }
+  });
 });
