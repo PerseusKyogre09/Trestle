@@ -202,6 +202,31 @@ export function fallbackWorkflowForBrief(brief: PlanningBrief): Workflow | null 
     evidence: [],
     executionMode: "manual" as const,
   };
+  if (brief.eventType === "online_identity_misuse") {
+    return {
+      title: "Respond to online identity misuse",
+      description: "Secure affected accounts, preserve evidence, and identify the correct official reporting or support channel. TRESTLE will not contact services or change accounts for you.",
+      actions: [
+        { ...base, id: "identify-affected-services", title: "Identify the affected account or service", description: "Record which online account or service appears to be affected and what you observed. Do not enter passwords, one-time codes, full account numbers, or identity numbers.", requiredInputs: ["Affected service and observed misuse, without credentials or identity numbers"], successCriteria: ["The affected service and user-observed issue are recorded locally."] },
+        { ...base, id: "secure-online-accounts", title: "Secure your affected accounts", description: "Use the service's official app or website, reached directly, to change compromised credentials, end unfamiliar sessions, and enable available security protections. Never share a one-time code with anyone claiming to help.", dependencies: ["identify-affected-services"], requiredInputs: ["User's own account-security actions and their results"], successCriteria: ["The user has reviewed available account protections and recorded any action they personally completed."] },
+        { ...base, id: "preserve-identity-misuse-evidence", title: "Save evidence of the misuse", description: "Keep relevant messages, emails, alerts, URLs, and dates in a secure place. Do not upload private evidence to TRESTLE.", dependencies: ["identify-affected-services"], requiredInputs: ["User's private evidence checklist"], successCriteria: ["Relevant evidence has been preserved by the user or its absence is noted."] },
+        { ...base, id: "research-identity-misuse-reporting", title: "Find the official support or reporting channel", description: "Use public sources to identify the affected service's official recovery channel and any relevant government identity-misuse reporting route for your location. Verify the destination before sharing information.", dependencies: ["identify-affected-services"], requiredInputs: ["Country or region, if needed to identify a government reporting route"], successCriteria: ["Official service support and relevant public reporting guidance are recorded with source URLs."], executionMode: "assisted" },
+        { ...base, id: "review-identity-misuse-next-steps", title: "Review your next steps", description: "Compare the official guidance with what happened. Contact the service or authority yourself using a verified channel, and record any confirmation you actually receive.", dependencies: ["secure-online-accounts", "preserve-identity-misuse-evidence", "research-identity-misuse-reporting"], requiredInputs: ["User review of remaining actions"], successCriteria: ["The user has a checked next-step list; no report or account change is assumed to be complete."] },
+      ],
+    };
+  }
+  if (brief.eventType === "driving_license_application") {
+    return {
+      title: "Driving licence application checklist",
+      description: "Confirm the applicable location, check the official eligibility and application instructions, and prepare to complete the process yourself.",
+      actions: [
+        { ...base, id: "confirm-license-jurisdiction", title: "Confirm where you will apply", description: "Tell TRESTLE your country and state or region. Do not enter a street address, licence number, or other identity number.", requiredInputs: ["Country and state or region"], successCriteria: ["The user-provided application jurisdiction is recorded without an address or identity number."] },
+        { ...base, id: "research-license-application", title: "Research the official driving licence application process", description: "Find the relevant transport authority's official eligibility rules, application steps, required documents, tests, and fees. Use public information only and record the source URLs.", dependencies: ["confirm-license-jurisdiction"], requiredInputs: [], successCriteria: ["Official application instructions and source URLs are recorded."], executionMode: "assisted" },
+        { ...base, id: "prepare-license-application", title: "Prepare your application checklist", description: "Compare the official requirements with your own situation and prepare the information and documents you will need. Do not share identity numbers here.", dependencies: ["research-license-application"], requiredInputs: ["User review of eligibility and required documents"], successCriteria: ["The user has reviewed a checklist of applicable requirements and remaining questions."] },
+        { ...base, id: "complete-license-application-yourself", title: "Continue on the official transport service", description: "Use the official transport authority service to make an appointment or submit an application yourself. TRESTLE does not enter personal details or submit the application.", dependencies: ["prepare-license-application"], requiredInputs: ["User's own completion of any application or appointment"], successCriteria: ["No application or appointment is considered complete until the user confirms the official service's result."] },
+      ],
+    };
+  }
   if (brief.eventType === "spam_reporting") {
     return {
       title: "Suspicious caller reporting",
@@ -296,15 +321,6 @@ export function fallbackWorkflowForBrief(brief: PlanningBrief): Workflow | null 
       actions: [clarify, research, review],
     };
   }
-  if (brief.eventType === "life_event") {
-    return {
-      title: "Plan for your situation",
-      description: "A tailored plan could not be prepared automatically. Add a little more context or try again when planning is available.",
-      actions: [
-        { ...base, id: "clarify-situation", title: "Add the key details", description: "Describe the outcome you want and any relevant location, organization, or deadline. Do not include passwords, one-time codes, or full account or identity numbers.", requiredInputs: ["Specific outcome and relevant context"], successCriteria: ["The user has clarified the event enough to prepare a tailored plan."] },
-      ],
-    };
-  }
   if (brief.eventType === "moving_city") {
     return {
       title: "Moving preparation plan",
@@ -327,5 +343,13 @@ export function fallbackWorkflowForBrief(brief: PlanningBrief): Workflow | null 
       ],
     };
   }
-  return null;
+  return {
+    title: "Plan for your situation",
+    description: "Clarify what outcome you need, check relevant official guidance, and prepare steps for you to review and complete.",
+    actions: [
+      { ...base, id: "clarify-situation", title: "Clarify the outcome you need", description: "Describe the result you want, any organization involved, and any important deadline. Keep passwords, one-time codes, account numbers, and identity numbers out of the description.", requiredInputs: ["Desired outcome and relevant context"], successCriteria: ["The user has identified the outcome and any key constraints."] },
+      { ...base, id: "research-situation-guidance", title: "Research relevant official guidance", description: `Find public guidance relevant to ${brief.eventSummary || "the situation"}. Use official sources where possible and record uncertainties instead of guessing.`, dependencies: ["clarify-situation"], requiredInputs: [], successCriteria: ["Relevant public guidance and source URLs are recorded."], executionMode: "assisted" },
+      { ...base, id: "prepare-situation-next-steps", title: "Review and prepare your next steps", description: "Compare the guidance with your situation, note what information or documents you may need, and decide what to do yourself. TRESTLE will not submit forms, contact organizations, or make consequential changes.", dependencies: ["research-situation-guidance"], requiredInputs: ["User review of the guidance and next steps"], successCriteria: ["A user-reviewed next-step checklist and unresolved questions are recorded."] },
+    ],
+  };
 }

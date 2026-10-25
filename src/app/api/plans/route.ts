@@ -19,9 +19,6 @@ export async function POST(request: Request) {
       : NextResponse.json({ error: "No safe property-document workflow is available." }, { status: 422 });
   }
   const aiPlan = await planWithGroq(brief.brief).catch(() => null);
-  if (brief.brief.eventType === "life_event" && !aiPlan) {
-    return NextResponse.json({ error: "TRESTLE couldn't prepare a tailored plan right now. Please try again shortly or add more detail about the outcome you need." }, { status: 503 });
-  }
   if (brief.brief.eventType === "spam_reporting") {
     const modelWorkflow = aiPlan ? planSpamToWorkflow(aiPlan, brief.brief) : null;
     const workflow = modelWorkflow ?? fallbackWorkflowForBrief(brief.brief);

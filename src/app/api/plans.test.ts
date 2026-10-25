@@ -102,4 +102,31 @@ describe("POST /api/plans", () => {
     }));
     expect(response.status).toBe(422);
   });
+
+  it("uses a local Hindi driving-licence workflow when Groq is not configured", async () => {
+    delete process.env.GROQ_API_KEY;
+    const response = await POST(new Request("http://localhost/api/plans", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ originalInput: "मुझे ड्राइविंग लाइसेंस बनवाना है।" }),
+    }));
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result.source).toBe("deterministic-fallback");
+    expect(result.workflow.title).toBe("Driving licence application checklist");
+    expect(result.workflow.actions.map((action: { id: string }) => action.id)).toContain("confirm-license-jurisdiction");
+    expect(result.workflow.actions.find((action: { id: string }) => action.id === "research-license-application")?.dependencies).toContain("confirm-license-jurisdiction");
+  });
+
+  it("returns an identity-misuse workflow when Groq is unavailable", async () => {
+    delete process.env.GROQ_API_KEY;
+    const response = await POST(new Request("http://localhost/api/plans", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ originalInput: "My identity is being misused online" }),
+    }));
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result.source).toBe("deterministic-fallback");
+    expect(result.workflow.title).toBe("Respond to online identity misuse");
+    expect(result.workflow.actions.map((action: { id: string }) => action.id)).toContain("research-identity-misuse-reporting");
+  });
 });

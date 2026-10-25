@@ -27,7 +27,7 @@ const sensitivePatterns = [
   /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/i,
   /\b(?:\+?\d[\s-]?){8,}\b/,
   /\b(?:aadhaar|pan|passport|dl|driving licence|license)\s*(?:number|no\.?|#)?\s*[:=-]?\s*[a-z0-9-]{5,}\b/i,
-  /\b(?:account|card)\s*(?:number|no\.?|#)?\s*[:=-]?\s*[a-z0-9-]{6,}\b/i,
+  /\b(?:account|card)(?:\s*(?:number|no\.?|#))?\s*[:=-]?\s*(?=[a-z0-9-]*\d)[a-z0-9-]{6,}\b/i,
 ];
 
 export function createPlanningBrief(input: string):
@@ -54,7 +54,10 @@ export function createPlanningBrief(input: string):
   const travelDestination = text.match(/\b(?:travel(?:ing|ling)?|trip|visit(?:ing)?|vacation|holiday)\s+(?:to|in)\s+(?:the\s+)?([A-Z][\p{L}'’-]*(?:\s+[A-Z][\p{L}'’-]*){0,2})/u)?.[1] ?? null;
   const propertyPurchase = /\b(?:bought|purchased|buying|purchase|purchasing)\b.{0,45}\b(?:house|home|property|flat|apartment|land)\b/i.test(text) ||
     /\b(?:house|home|property|flat|apartment|land)\b.{0,35}\b(?:bought|purchased|buying|purchase|purchasing)\b/i.test(text);
-  const eventType = lower.includes("wallet")
+  const hindiDrivingLicenseApplication = /(?:ड्राइविंग\s*लाइसेंस|ड्राइविंग\s*लाइसेन्स|ड्राइविंग\s*लाइसेंस|ड्राइविंग\s*लाइसेंस\s*(?:बनवाना|बनाना|चाहिए)|लाइसेंस\s*(?:बनवाना|बनाना|चाहिए))/u.test(text);
+  const eventType = hindiDrivingLicenseApplication
+    ? "driving_license_application"
+    : lower.includes("wallet")
     ? "lost_wallet"
     : unwantedCommunication || /(spam|unsolicited|scam call|spam caller|suspicious number|report.*number)/i.test(text)
     ? "spam_reporting"
@@ -73,7 +76,9 @@ export function createPlanningBrief(input: string):
     : lower.includes("insurance") || lower.includes("claim")
     ? "insurance_claim"
       : "life_event";
-  const documentTypes = eventType === "online_identity_misuse"
+  const documentTypes = eventType === "driving_license_application"
+    ? ["driving licence application"]
+    : eventType === "online_identity_misuse"
     ? ["online identity misuse reporting and account protection"]
     : eventType === "spam_reporting" ? ["spam reporting"] : eventType === "travel_planning"
     ? [travelDestination ? `travel to ${travelDestination}` : "travel planning"] : eventType === "property_purchase"
@@ -103,6 +108,8 @@ export function createPlanningBrief(input: string):
         ? "online identity misuse response and account protection"
         : eventType === "travel_planning"
         ? `Travel planning${travelDestination ? ` for ${travelDestination}` : ""}${/\bfirst\s+time\b/i.test(text) ? "; first visit" : ""}`
+        : eventType === "driving_license_application"
+        ? "The user wants to apply for a driving licence; identify the correct local process and required steps."
         : eventType === "property_purchase"
         ? "property purchase document guidance"
         : eventType.replaceAll("_", " "),

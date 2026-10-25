@@ -27,6 +27,15 @@ describe("provider privacy boundary", () => {
     });
   });
 
+  it("allows generic account-protection research while rejecting account numbers", () => {
+    expect(createResearchBrief("India", "online identity misuse reporting and account protection")).toEqual({
+      jurisdiction: "India",
+      documentType: "online identity misuse reporting and account protection",
+    });
+    expect(createResearchBrief("India", "account number 12345678")).toBeNull();
+    expect(createResearchBrief("India", "card 1234567890123456")).toBeNull();
+  });
+
   it("classifies spam-report requests locally without retaining the number in the planning brief", () => {
     const result = createPlanningBrief("I received an unwanted spam caller and need the official Indian reporting route.");
     expect(result.ok).toBe(true);

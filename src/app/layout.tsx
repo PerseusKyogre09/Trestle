@@ -2,16 +2,25 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TRESTLE — A clear next step",
+  title: {
+    default: "TRESTLE — One problem. One clear next step.",
+    template: "%s — TRESTLE",
+  },
   description:
-    "A steady hand for life’s paperwork, official guidance, and decisions that need you.",
+    "TRESTLE helps you navigate complicated real-life situations: understand the problem, make a plan, research information, and get things done.",
 };
 
-export default function RootLayout(
-  { children }: Readonly<{ children: React.ReactNode }>,
-) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

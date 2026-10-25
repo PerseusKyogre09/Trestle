@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fallbackWorkflowForBrief, planSpamToWorkflow, planWithGroq } from "./planner";
+import { createPlanningBrief } from "./privacyBoundary";
 import type { PlanningBrief } from "./privacyBoundary";
 
 const brief: PlanningBrief = {
@@ -68,6 +69,36 @@ describe("Groq planning boundary", () => {
     expect(workflow?.actions[2].dependencies).toEqual(["research-reporting-route"]);
     expect(workflow?.actions[3].dependencies).toEqual(["record-suspicious-identifier"]);
     expect(workflow?.actions[5].description).toContain("does not collect or upload the file");
+  });
+
+  it("recognizes a Hindi driving-licence request and builds a usable local workflow", () => {
+    const parsed = createPlanningBrief("मुझे ड्राइविंग लाइसेंस बनवाना है।");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.brief.eventType).toBe("driving_license_application");
+    const workflow = fallbackWorkflowForBrief(parsed.brief);
+    expect(workflow?.title).toBe("Driving licence application checklist");
+    expect(workflow?.actions.map((action) => action.id)).toEqual([
+      "confirm-license-jurisdiction", "research-license-application", "prepare-license-application", "complete-license-application-yourself",
+    ]);
+  });
+
+  it("builds a local response plan for online identity misuse", () => {
+    const parsed = createPlanningBrief("My identity is being misused online");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.brief.eventType).toBe("online_identity_misuse");
+    const workflow = fallbackWorkflowForBrief(parsed.brief);
+    expect(workflow?.title).toBe("Respond to online identity misuse");
+    expect(workflow?.actions.map((action) => action.id)).toContain("research-identity-misuse-reporting");
+    expect(workflow?.actions.some((action) => /password|one-time code/i.test(action.description))).toBe(true);
+  });
+
+  it("returns a general workflow for an otherwise unclassified described event", () => {
+    const workflow = fallbackWorkflowForBrief({ ...brief, eventType: "life_event", eventSummary: "a damaged household item" });
+    expect(workflow?.actions.map((action) => action.id)).toEqual([
+      "clarify-situation", "research-situation-guidance", "prepare-situation-next-steps",
+    ]);
   });
 
   it("uses Groq wording only when it preserves the approved spam workflow graph and trusted policy", () => {
