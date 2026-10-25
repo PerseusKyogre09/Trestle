@@ -519,13 +519,16 @@ export async function updateWorkflowRun(
     pauseRequested: boolean;
     errorMessage: string | null;
     finishedAt: Date | null;
+    context: { jurisdiction: string; documentType: string };
   }>,
 ): Promise<WorkflowRun | null> {
   const status = data.status;
+  const { context, ...workflowData } = data;
   const updated = await prisma.workflowRun.update({
     where: { id },
     data: {
-      ...data,
+      ...workflowData,
+      ...(context ? { context: JSON.stringify(context) } : {}),
       activeLock: status && terminalWorkflowStatuses.has(status) ? null : undefined,
       runnerClaimed: status && terminalWorkflowStatuses.has(status) ? false : undefined,
     },

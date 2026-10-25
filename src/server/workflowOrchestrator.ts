@@ -28,8 +28,10 @@ import { prisma } from "./db";
 import { executionController } from "./execution/controller";
 import { providerRegistry } from "./execution/registry";
 import type { ProviderProgressEvent } from "./execution/types";
+import { normalizeJurisdictionAnswer } from "./privacyBoundary";
 
 const activeOrchestrators = new Set<string>();
+const queuedOrchestratorRuns = new Set<string>();
 const terminalStatuses = new Set<WorkflowRunStatus>([
   "completed",
   "failed",
@@ -126,12 +128,18 @@ async function setRunStatus(
 }
 
 async function orchestrate(runId: string): Promise<void> {
-  if (activeOrchestrators.has(runId)) return;
+  if (activeOrchestrators.has(runId)) {
+    queuedOrchestratorRuns.add(runId);
+    return;
+  }
   activeOrchestrators.add(runId);
   let claimed = false;
   try {
     claimed = await claimWorkflowRunner(runId);
     if (!claimed) return;
+    await appendEvent(runId, makeEvent("SCHEDULER_STARTED", {
+      message: "Workflow runner started checking prerequisites and selecting the next eligible step.",
+    }));
     while (true) {
       const runRecord = await getWorkflowRunRecord(runId);
       if (!runRecord || runRecord.status !== "running") return;
@@ -302,6 +310,10 @@ async function orchestrate(runId: string): Promise<void> {
   } finally {
     if (claimed) await releaseWorkflowRunner(runId);
     activeOrchestrators.delete(runId);
+    if (queuedOrchestratorRuns.delete(runId)) {
+      const latest = await getWorkflowRunRecord(runId).catch(() => null);
+      if (latest?.status === "running") void orchestrate(runId);
+    }
   }
 }
 
@@ -399,6 +411,16 @@ export async function resumeAfterUserAction(caseId: string): Promise<void> {
     if (run.status !== "waiting_for_user" || !run.currentActionId) continue;
     const action = caseItem.actions.find((item) => item.id === run.currentActionId);
     if (action?.status !== "completed") continue;
+    if (action.id === "confirm-property-jurisdiction") {
+      const locationEvidence = [...action.evidence].reverse().find((item) => item.kind === "user_provided");
+      const jurisdiction = locationEvidence ? normalizeJurisdictionAnswer(locationEvidence.note) : null;
+      const runRecord = await getWorkflowRunRecord(run.id);
+      if (!jurisdiction || !runRecord) continue;
+      const context = JSON.parse(runRecord.context) as { jurisdiction: string; documentType: string };
+      await updateWorkflowRun(run.id, {
+        context: { ...context, jurisdiction, documentType: "property purchase documents and registration" },
+      });
+    }
     await updateWorkflowRun(run.id, { status: "running", pauseRequested: false, errorMessage: null });
     await appendEvent(run.id, makeEvent("WORKFLOW_RESUMED", {
       actionId: run.currentActionId ?? undefined,

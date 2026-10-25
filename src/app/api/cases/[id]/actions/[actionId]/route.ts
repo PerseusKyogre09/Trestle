@@ -4,6 +4,7 @@ import { transitionSchema } from "../../../../../../domain/validation";
 import { getCase, updateAction } from "../../../../../../server/repository";
 import { resumeAfterUserAction } from "../../../../../../server/workflowOrchestrator";
 import { invalidateApproval } from "../../../../../../server/approvalService";
+import { normalizeJurisdictionAnswer } from "../../../../../../server/privacyBoundary";
 
 export async function PATCH(
   request: Request,
@@ -27,6 +28,11 @@ export async function PATCH(
       { error: body.error.issues[0]?.message ?? "Invalid request." },
       { status: 400 },
     );
+  }
+
+  if (action.id === "confirm-property-jurisdiction" && body.data.status === "completed" &&
+    (!body.data.evidence || !normalizeJurisdictionAnswer(body.data.evidence.note))) {
+    return NextResponse.json({ error: "Enter only the country and state, province, or city. Do not include a street address or property identifier." }, { status: 422 });
   }
 
   // Enforce server-side security rule:
@@ -61,7 +67,11 @@ export async function PATCH(
   }
 
   try {
-    assertTransition(action.status, body.data.status, body.data.evidence);
+    // Repeated in-progress updates are used to persist one-at-a-time answers
+    // within a single guided step. This does not complete or resume the action.
+    if (!(action.status === "in_progress" && body.data.status === "in_progress")) {
+      assertTransition(action.status, body.data.status, body.data.evidence);
+    }
     const updated = await updateAction(
       actionId,
       body.data.status,

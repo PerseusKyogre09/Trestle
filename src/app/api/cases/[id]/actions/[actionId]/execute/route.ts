@@ -24,6 +24,13 @@ export async function POST(
     );
   }
 
+  if (parsed.data.provider === "mock-provider" && process.env.NODE_ENV !== "test") {
+    return NextResponse.json(
+      { error: "Simulated execution is disabled in the application. Start the workflow to run supported live providers, or record your own progress." },
+      { status: 403 },
+    );
+  }
+
   try {
     const result = await executionController.execute(id, actionId, {
       // Operation details are derived from the persisted action and approval

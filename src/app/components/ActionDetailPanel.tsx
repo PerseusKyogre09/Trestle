@@ -15,7 +15,6 @@ import type {
   Approval,
   Case,
   ExecutionAttempt,
-  ProposedOperation,
 } from "../../domain/types";
 
 const tone: Record<string, string> = {
@@ -136,18 +135,6 @@ export default function ActionDetailPanel(
   const [executions, setExecutions] = useState<ExecutionAttempt[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [jurisdiction, setJurisdiction] = useState("India");
-  const [documentType, setDocumentType] = useState("Indian driving licence");
-  const operation: ProposedOperation = {
-    operationType: "complete_action",
-    description: action.description,
-    payload: { actionId: action.id },
-  };
-  const liveOperation: ProposedOperation = {
-    operationType: "lost_document_research",
-    description: "Research the official lost-document replacement process.",
-    payload: { jurisdiction, documentType },
-  };
 
   useEffect(() => {
     Promise.all([
@@ -167,22 +154,6 @@ export default function ActionDetailPanel(
       .catch(() => setMessage("Approval history could not be loaded."));
   }, [action.id, caseItem.id]);
 
-  async function requestApproval() {
-    setBusy(true);
-    const response = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/approval`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ context: {} }),
-      },
-    );
-    const data = await response.json();
-    setBusy(false);
-    if (!response.ok) return setMessage(data.error);
-    setApprovals((current) => [data, ...current]);
-  }
-
   async function decide(approvalId: string, decision: "approve" | "reject") {
     setBusy(true);
     const response = await fetch(
@@ -201,81 +172,6 @@ export default function ActionDetailPanel(
     );
   }
 
-  async function execute() {
-    const approved = approvals.find((item) => item.status === "approved");
-    if (!approved) return;
-    setBusy(true);
-    const response = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/execute`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      },
-    );
-    const data = await response.json();
-    setBusy(false);
-    if (!response.ok) return setMessage(data.error);
-    const historyResponse = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/executions`,
-    );
-    if (!historyResponse.ok) {
-      setMessage("Execution succeeded, but its history could not be loaded.");
-      return;
-    }
-    setExecutions(await historyResponse.json());
-    window.location.reload();
-  }
-
-  async function requestLiveApproval() {
-    setBusy(true);
-    setMessage("");
-    const response = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/approval`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ context: { jurisdiction, documentType } }),
-      },
-    );
-    const data = await response.json();
-    setBusy(false);
-    if (!response.ok) return setMessage(data.error);
-    setApprovals((current) => [data, ...current]);
-  }
-
-  async function executeLive() {
-    const approved = approvals.find(
-      (item) =>
-        item.status === "approved" &&
-        item.operationType === liveOperation.operationType,
-    );
-    if (!approved) return setMessage("Approve the live research operation first.");
-    setBusy(true);
-    setMessage("");
-    const response = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/execute`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          operation: liveOperation,
-          provider: "tinyfish",
-        }),
-      },
-    );
-    const data = await response.json();
-    setBusy(false);
-    if (!response.ok) return setMessage(data.error);
-    const historyResponse = await fetch(
-      `/api/cases/${caseItem.id}/actions/${action.id}/executions`,
-    );
-    if (historyResponse.ok) setExecutions(await historyResponse.json());
-    else setMessage("Research finished, but execution history could not be loaded.");
-    if (data.outcome === "uncertain") {
-      setMessage(data.uncertaintyReason ?? "TinyFish returned an inconclusive result.");
-    }
-  }
   const blockedBy = action.dependencies.filter(
     (d) => caseItem.actions.find((a) => a.id === d)?.status !== "completed",
   );
@@ -319,19 +215,6 @@ export default function ActionDetailPanel(
           >
             {action.status.replace(/_/g, " ")}
           </span>
-        </div>
-
-        <div className="rounded-lg border border-blue-400/20 bg-blue-400/5 p-3">
-          <Label>Proposed operation</Label>
-          <Value>{operation.operationType.replace(/_/g, " ")}</Value>
-          <p className="mt-2 text-xs leading-5 text-slate-400">
-            {operation.description}
-          </p>
-          <pre className="mt-2 overflow-x-auto rounded bg-slate-950/70 p-2 text-[11px] text-slate-500">{JSON.stringify(operation.payload, null, 2)}</pre>
-          <p className="mt-2 text-[11px] text-slate-500">
-            This operation is local and simulated. No external service will be
-            contacted.
-          </p>
         </div>
 
         {/* Description */}
@@ -549,17 +432,6 @@ export default function ActionDetailPanel(
           </div>
         )}
         <div className="mt-2 flex flex-wrap gap-2">
-          {action.executionMode !== "manual" && !blockedBy.length && !approvals.some((item) =>
-            ["pending", "approved"].includes(item.status)
-          ) && (
-            <button
-              disabled={busy}
-              onClick={requestApproval}
-              className="rounded-md bg-orange-500 px-3 py-2 text-sm text-white disabled:opacity-50"
-            >
-              Request approval
-            </button>
-          )}
           {action.executionMode === "manual" && !blockedBy.length && (
             <p className="max-w-xl text-xs leading-5 text-slate-400">
               This step is for you to complete. TRESTLE has no real provider for it, so requesting automated permission would not make it executable. Use the Workflow Copilot to record your progress.
@@ -594,13 +466,9 @@ export default function ActionDetailPanel(
             </>
           )}
           {approvals.some((item) => item.status === "approved") && (
-            <button
-              disabled={busy}
-              onClick={execute}
-              className="rounded-md bg-blue-500 px-3 py-2 text-sm text-white disabled:opacity-50"
-            >
-              Execute simulated action
-            </button>
+            <p className="w-full text-xs text-emerald-300">
+              Approved. The workflow copilot will run this only if a real provider supports it.
+            </p>
           )}
         </div>
         {executions[0] && (
@@ -707,101 +575,9 @@ export default function ActionDetailPanel(
             ))}
           </div>
         )}
-        {action.id === "identify-reporting" && (
-          <div className="mt-4 rounded-lg border border-cyan-400/20 bg-cyan-400/5 p-3">
-            <Label>Live TinyFish research</Label>
-            <p className="mt-1 text-xs leading-5 text-slate-400">
-              This researches official guidance only. It does not submit an application,
-              upload documents, pay fees, or claim replacement completion.
-            </p>
-            <div className="mt-3 grid gap-2">
-              <label className="text-xs text-slate-400">
-                Jurisdiction
-                <input
-                  value={jurisdiction}
-                  onChange={(event) => setJurisdiction(event.target.value)}
-                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200"
-                />
-              </label>
-              <label className="text-xs text-slate-400">
-                Document type
-                <input
-                  value={documentType}
-                  onChange={(event) => setDocumentType(event.target.value)}
-                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200"
-                />
-              </label>
-            </div>
-            <p className="mt-2 text-[11px] text-cyan-300">
-              LIVE TINYFISH · requires a separate approval for this exact research operation
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {!approvals.some((item) =>
-                ["pending", "approved"].includes(item.status) &&
-                item.operationType === "lost_document_research"
-              ) && (
-                <button
-                  disabled={busy || !jurisdiction.trim() || !documentType.trim()}
-                  onClick={requestLiveApproval}
-                  className="rounded-md border border-cyan-400/40 px-3 py-2 text-sm text-cyan-200 disabled:opacity-50"
-                >
-                  Request live research approval
-                </button>
-              )}
-              {approvals.find(
-                (item) =>
-                  item.status === "pending" &&
-                  item.operationType === "lost_document_research",
-              ) && (
-                <>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      decide(
-                        approvals.find(
-                          (item) =>
-                            item.status === "pending" &&
-                            item.operationType === "lost_document_research",
-                        )!.id,
-                        "approve",
-                      )}
-                    className="rounded-md bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-50"
-                  >
-                    Approve live research
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      decide(
-                        approvals.find(
-                          (item) =>
-                            item.status === "pending" &&
-                            item.operationType === "lost_document_research",
-                        )!.id,
-                        "reject",
-                      )}
-                    className="rounded-md border border-rose-400/40 px-3 py-2 text-sm text-rose-300 disabled:opacity-50"
-                  >
-                    Reject
-                  </button>
-                </>
-              )}
-              {approvals.some(
-                (item) =>
-                  item.status === "approved" &&
-                  item.operationType === "lost_document_research",
-              ) && (
-                <button
-                  disabled={busy}
-                  onClick={executeLive}
-                  className="rounded-md bg-cyan-600 px-3 py-2 text-sm text-white disabled:opacity-50"
-                >
-                  Run LIVE TINYFISH research
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        <p className="mt-3 border-t border-slate-800 pt-3 text-xs leading-5 text-slate-400">
+          Start or resume work from the Workflow Copilot. It uses live TinyFish only for supported public research; other steps remain your actions and are never simulated as real.
+        </p>
         {message && (
           <p role="alert" className="mt-2 text-xs text-rose-300">{message}</p>
         )}

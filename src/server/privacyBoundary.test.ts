@@ -36,4 +36,27 @@ describe("provider privacy boundary", () => {
       expect(JSON.stringify(result.brief)).not.toMatch(/\d{10}/);
     }
   });
+
+  it("recognizes a plain-language unwanted-calls description without asking for a different category", () => {
+    const result = createPlanningBrief("I keep getting unwanted calls.");
+    expect(result).toMatchObject({
+      ok: true,
+      brief: { eventType: "spam_reporting", jurisdiction: "India", documentTypes: ["spam reporting"] },
+    });
+    if (result.ok) expect(JSON.stringify(result.brief)).not.toContain("unwanted calls");
+  });
+
+  it("recognizes an ordinary-language relocation request with its Indian jurisdiction", () => {
+    expect(createPlanningBrief("I need to shift from Mumbai to Delhi.")).toMatchObject({
+      ok: true,
+      brief: { eventType: "moving_city", jurisdiction: "India" },
+    });
+  });
+
+  it("allows concrete unfamiliar events through with a planning summary, but rejects vague prompts", () => {
+    const result = createPlanningBrief("My landlord says I need to leave next week and I want to understand my options.");
+    expect(result).toMatchObject({ ok: true, brief: { eventType: "life_event" } });
+    if (result.ok) expect(result.brief.eventSummary).toContain("landlord");
+    expect(createPlanningBrief("I need help")).toMatchObject({ ok: false });
+  });
 });

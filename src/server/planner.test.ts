@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { fallbackWorkflowForBrief, planWithGroq } from "./planner";
+import { fallbackWorkflowForBrief, planSpamToWorkflow, planWithGroq } from "./planner";
 import type { PlanningBrief } from "./privacyBoundary";
 
 const brief: PlanningBrief = {
   eventType: "lost_document",
   jurisdiction: "India",
   documentTypes: ["Indian driving licence"],
+  eventSummary: "lost document",
   planningGoal: "public_research_and_user_action_plan",
 };
 
@@ -67,5 +68,57 @@ describe("Groq planning boundary", () => {
     expect(workflow?.actions[2].dependencies).toEqual(["research-reporting-route"]);
     expect(workflow?.actions[3].dependencies).toEqual(["record-suspicious-identifier"]);
     expect(workflow?.actions[5].description).toContain("does not collect or upload the file");
+  });
+
+  it("uses Groq wording only when it preserves the approved spam workflow graph and trusted policy", () => {
+    const spamBrief = { ...brief, eventType: "spam_reporting", documentTypes: ["spam caller identifier"] };
+    const trusted = fallbackWorkflowForBrief(spamBrief)!;
+    const proposed = {
+      title: "A clear plan for unwanted calls",
+      description: "Separate ordinary unwanted calls from suspected cybercrime and find the right official route.",
+      missingInputs: [],
+      actions: trusted.actions.map((action) => ({
+        id: action.id,
+        title: `Step: ${action.title}`,
+        description: action.description,
+        dependencies: action.dependencies,
+        priority: action.priority,
+        riskLevel: "low" as const,
+        approvalRequired: false,
+        requiredInputs: [],
+        successCriteria: ["Groq suggested this."],
+        liveResearch: action.executionMode === "assisted",
+        requiresUserAction: action.executionMode !== "assisted",
+      })),
+    };
+    const workflow = planSpamToWorkflow(proposed, spamBrief);
+
+    expect(workflow?.title).toBe(proposed.title);
+    expect(workflow?.actions[0].title).toBe("Step: Describe what kind of call or message you received");
+    expect(workflow?.actions.find((action) => action.id === "research-reporting-route")?.executionMode).toBe("assisted");
+    expect(workflow?.actions.find((action) => action.id === "review-report-manually")?.requiredInputs).toEqual(trusted.actions.at(-1)?.requiredInputs);
+    expect(workflow?.actions.find((action) => action.id === "review-report-manually")?.executionMode).toBe("manual");
+  });
+
+  it("rejects Groq spam plans that add steps, change dependencies, or claim a report was submitted", () => {
+    const spamBrief = { ...brief, eventType: "spam_reporting", documentTypes: ["spam caller identifier"] };
+    const trusted = fallbackWorkflowForBrief(spamBrief)!;
+    const makePlan = () => ({
+      title: "Safe plan", description: "A safe plan", missingInputs: [],
+      actions: trusted.actions.map((action) => ({
+        id: action.id, title: action.title, description: action.description,
+        dependencies: action.dependencies, priority: action.priority, riskLevel: action.riskLevel,
+        approvalRequired: action.approvalRequired, requiredInputs: action.requiredInputs,
+        successCriteria: action.successCriteria, liveResearch: action.executionMode === "assisted",
+        requiresUserAction: action.executionMode !== "assisted",
+      })),
+    });
+    const changedDependency = makePlan();
+    changedDependency.actions[2].dependencies = [];
+    expect(planSpamToWorkflow(changedDependency, spamBrief)).toBeNull();
+
+    const falseClaim = makePlan();
+    falseClaim.actions[6].description = "Your report has been submitted successfully.";
+    expect(planSpamToWorkflow(falseClaim, spamBrief)).toBeNull();
   });
 });

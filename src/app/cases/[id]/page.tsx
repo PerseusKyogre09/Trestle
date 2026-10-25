@@ -16,6 +16,7 @@ import type {
 } from "../../../domain/types";
 import ActionDetailPanel from "../../components/ActionDetailPanel";
 import WorkflowRunPanel from "../../components/WorkflowRunPanel";
+import { createPlanningBrief } from "../../../server/privacyBoundary";
 
 const ActionGraph = dynamic(() => import("../../components/ActionGraph"), {
   ssr: false,
@@ -82,15 +83,15 @@ export default function CasePage() {
   const [submittingReq, setSubmittingReq] = useState(false);
 
   // Execution state
-  const [executingActionId, setExecutingActionId] = useState<string | null>(
-    null,
-  );
-  const [researchJurisdiction, setResearchJurisdiction] = useState(
-    "India",
-  );
-  const [researchDocumentType, setResearchDocumentType] = useState(
-    "Indian driving licence",
-  );
+  const [researchJurisdiction, setResearchJurisdiction] = useState("");
+  const [researchDocumentType, setResearchDocumentType] = useState("");
+
+  const syncResearchContext = (originalInput: string) => {
+    const planning = createPlanningBrief(originalInput);
+    if (!planning.ok) return;
+    if (planning.brief.jurisdiction) setResearchJurisdiction(planning.brief.jurisdiction);
+    if (planning.brief.documentTypes[0]) setResearchDocumentType(planning.brief.documentTypes[0]);
+  };
 
   // Execution history modal
   const [historyAction, setHistoryAction] = useState<Action | null>(null);
@@ -109,7 +110,10 @@ export default function CasePage() {
         if (!caseRes.ok) {
           throw new Error(caseData.error || "Failed to load case");
         }
-        if (isMounted) setItem(caseData);
+        if (isMounted) {
+          setItem(caseData);
+          syncResearchContext(caseData.originalInput);
+        }
 
         if (approvalsRes.ok) {
           const approvalsData = await approvalsRes.json();
@@ -137,6 +141,7 @@ export default function CasePage() {
       const caseData = await caseRes.json();
       if (!caseRes.ok) throw new Error(caseData.error || "Failed to load case");
       setItem(caseData);
+      syncResearchContext(caseData.originalInput);
 
       if (approvalsRes.ok) {
         const approvalsData = await approvalsRes.json();
@@ -153,7 +158,7 @@ export default function CasePage() {
       action: Action,
       status: "in_progress" | "completed" | "failed",
       userReport?: string,
-    ) => {
+    ): Promise<boolean> => {
       let evidence: { kind: "user_provided"; note: string; recordedAt: string } | undefined;
       if (status === "completed") {
         const needsUserReport = action.executionMode !== "automated" &&
@@ -161,10 +166,16 @@ export default function CasePage() {
         const report = needsUserReport
           ? userReport?.trim() || window.prompt("Describe what you completed yourself. TRESTLE records this as your report; it does not independently verify the external result.")
           : userReport?.trim() || "User reports completing this task after reviewing the result.";
-        if (report === null || !report.trim()) return;
+        if (report === null || !report.trim()) return false;
         evidence = {
           kind: "user_provided",
           note: needsUserReport ? `User reports: ${report.trim()}` : report.trim(),
+          recordedAt: new Date().toISOString(),
+        };
+      } else if (status === "in_progress" && userReport?.trim()) {
+        evidence = {
+          kind: "user_provided",
+          note: userReport.trim(),
           recordedAt: new Date().toISOString(),
         };
       }
@@ -177,9 +188,10 @@ export default function CasePage() {
       const d = await r.json();
       if (!r.ok) {
         setError(d.error);
-        return;
+        return false;
       }
       await refreshData();
+      return true;
     },
     [id, refreshData],
   );
@@ -298,31 +310,6 @@ export default function CasePage() {
     }
   };
 
-  const requestActionApproval = async (action: Action) => {
-    setSubmittingReq(true);
-    setFeedback("");
-    setError("");
-    try {
-      const res = await fetch(`/api/cases/${id}/actions/${action.id}/approval`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          context: action.id === "identify-reporting"
-            ? { jurisdiction: researchJurisdiction, documentType: researchDocumentType }
-            : {},
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setFeedback(`Permission request created for "${action.title}".`);
-      await refreshData();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to request permission");
-    } finally {
-      setSubmittingReq(false);
-    }
-  };
-
   // Decide on an approval (Approve or Reject)
   const handleDecision = async (decision: "approve" | "reject") => {
     if (!reviewApproval) return;
@@ -359,133 +346,6 @@ export default function CasePage() {
       setError(e instanceof Error ? e.message : "Failed to record decision");
     } finally {
       setDeciding(false);
-    }
-  };
-
-  // Execute an action via execution controller
-  const executeAction = async (action: Action) => {
-    setExecutingActionId(action.id);
-    setFeedback("");
-    setError("");
-
-    try {
-      const latestApproved = approvals.find(
-        (ap) => ap.actionId === action.id && ap.status === "approved",
-      );
-
-      let operation = undefined;
-      if (latestApproved) {
-        try {
-          operation = {
-            operationType: latestApproved.operationType,
-            description: latestApproved.operationDescription,
-            destination: latestApproved.destination ?? undefined,
-            payload: JSON.parse(latestApproved.payload) as Record<
-              string,
-              unknown
-            >,
-          };
-        } catch {
-          // fallback
-        }
-      }
-
-      const res = await fetch(`/api/cases/${id}/actions/${action.id}/execute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation,
-          provider: "mock-provider",
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      if (data.outcome === "verified") {
-        setFeedback(`Action executed and verified successfully.`);
-      } else if (data.outcome === "uncertain") {
-        setFeedback(
-          `Execution completed with UNCERTAIN outcome: ${
-            data.uncertaintyReason || "Needs reconciliation"
-          }`,
-        );
-      } else {
-        setFeedback(`Operation executed. Outcome status: ${data.outcome}.`);
-      }
-      await refreshData();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Execution failed");
-    } finally {
-      setExecutingActionId(null);
-    }
-  };
-
-  const executeTinyFishResearch = async (action: Action) => {
-    setExecutingActionId(action.id);
-    setFeedback("");
-    setError("");
-
-    const approved = approvals.find(
-      (approval) =>
-        approval.actionId === action.id &&
-        approval.status === "approved" &&
-        approval.operationType === "lost_document_research",
-    );
-    if (!approved) {
-      setError("A current approved TinyFish research operation is required.");
-      setExecutingActionId(null);
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/cases/${id}/actions/${action.id}/execute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "tinyfish" }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      if (data.outcome === "failed") {
-        setError(`LIVE TINYFISH failed: ${data.resultSummary || "The provider did not complete the research."}`);
-      } else if (data.outcome === "uncertain") {
-        setError(`LIVE TINYFISH is inconclusive: ${data.uncertaintyReason || "No verified final result was received."}`);
-      } else if (data.outcome === "verified" || data.outcome === "unverified") {
-        setFeedback(`LIVE TINYFISH research finished: ${data.resultSummary}`);
-      } else {
-        setError("LIVE TINYFISH returned an unrecognized outcome.");
-      }
-      await refreshData();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "TinyFish execution failed");
-    } finally {
-      setExecutingActionId(null);
-    }
-  };
-
-  const requestTinyFishApproval = async (action: Action) => {
-    setSubmittingReq(true);
-    setFeedback("");
-    setError("");
-    try {
-      const res = await fetch(`/api/cases/${id}/actions/${action.id}/approval`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          context: {
-            jurisdiction: researchJurisdiction,
-            documentType: researchDocumentType,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setFeedback("Live TinyFish research approval requested.");
-      await refreshData();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to request approval");
-    } finally {
-      setSubmittingReq(false);
     }
   };
 
@@ -533,9 +393,11 @@ export default function CasePage() {
   }
 
   const completed = item.actions.filter((a) => a.status === "completed").length;
-  const counts = (status: string) =>
-    item.actions.filter((a) => a.status === status).length;
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
+  const caseBriefForResearch = createPlanningBrief(item.originalInput);
+  const supplementalResearchDefault = caseBriefForResearch.ok && caseBriefForResearch.brief.eventType === "online_identity_misuse"
+    ? "India"
+    : "";
 
   const resetDemoCase = async () => {
     if (!window.confirm("Reset this demo case to 0/5 and clear its history?")) {
@@ -556,20 +418,12 @@ export default function CasePage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col">
+    <main className="trestle-case-page flex min-h-screen flex-col">
       {/* ── Page header ─────────────────────────────────────────────── */}
       <div className="mx-auto w-full max-w-7xl px-6 py-10 sm:px-10">
         <Link href="/" className="text-sm text-blue-300 hover:underline">
           ← All cases
         </Link>
-        <button
-          type="button"
-          onClick={resetDemoCase}
-          className="float-right rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-400 hover:border-amber-400/60 hover:text-amber-200"
-        >
-          Reset demo to 0/5
-        </button>
-
         {/* Global Alerts / Feedback */}
         {feedback && (
           <div className="mt-6 rounded-lg border border-emerald-800/80 bg-emerald-950/50 p-4 text-emerald-200">
@@ -582,66 +436,20 @@ export default function CasePage() {
           </div>
         )}
 
-        <header className="mt-8 border-b border-slate-800 pb-8">
+        <header className="mt-8 border-b border-slate-800 pb-7">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm uppercase tracking-[0.25em] text-blue-300">
-              {item.status} case
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-300">
+              Your case
             </p>
-            <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">
-              Local Dev Mode · Backend Enforced
-            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs text-slate-300" aria-label="Case status">{item.status.replaceAll("_", " ")}</span>
           </div>
-          <h1 className="mt-3 text-4xl font-semibold text-slate-100">
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-100 sm:text-4xl">
             {item.title}
           </h1>
-          <p className="mt-4 max-w-3xl text-slate-300">{item.originalInput}</p>
-
-          {/* Stats */}
-          <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            {[
-              ["Progress", `${completed}/${item.actions.length}`],
-              ["Ready", counts("ready")],
-              ["Awaiting Approval", counts("awaiting_approval")],
-              ["Blocked", counts("blocked")],
-              ["Failed", counts("failed")],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-lg border border-slate-800 bg-slate-900/50 p-3"
-              >
-                <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-100">
-                  {value}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* View toggle */}
-          <div
-            className="mt-6 inline-flex rounded-lg border border-slate-800 bg-slate-900/50 p-1"
-            role="group"
-            aria-label="View mode"
-          >
-            {(["list", "graph"] as ViewMode[]).map((v) => (
-              <button
-                key={v}
-                id={`view-toggle-${v}`}
-                aria-pressed={view === v}
-                onClick={() => {
-                  setView(v);
-                  if (v === "list") setSelectedActionId(null);
-                }}
-                className={[
-                  "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
-                  view === v
-                    ? "bg-blue-500 text-white"
-                    : "text-slate-400 hover:text-slate-200",
-                ].join(" ")}
-              >
-                {v === "list" ? "☰ List" : "⬡ Graph"}
-              </button>
-            ))}
+          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-300">{item.originalInput}</p>
+          <div className="mt-6 max-w-3xl" aria-label={`Progress: ${completed} of ${item.actions.length} steps complete`}>
+            <div className="mb-2 flex items-center justify-between text-xs text-slate-500"><span>Progress</span><span>{completed} of {item.actions.length} steps</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-600 transition-all" style={{ width: `${item.actions.length ? completed / item.actions.length * 100 : 0}%` }} /></div>
           </div>
         </header>
 
@@ -651,10 +459,24 @@ export default function CasePage() {
           approvals={approvals}
           jurisdiction={researchJurisdiction}
           documentType={researchDocumentType}
+          supplementalResearchDefault={supplementalResearchDefault}
           onCaseRefresh={refreshData}
           onTransition={transition}
         />
 
+        <details className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-300 marker:hidden">
+            <span className="inline-flex items-center gap-2">Details & activity <span className="text-xs font-normal text-slate-500">{pendingApprovals.length ? `· ${pendingApprovals.length} approval${pendingApprovals.length === 1 ? "" : "s"} pending` : "· workflow history and diagnostics"}</span></span>
+          </summary>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">Persisted workflow actions, approvals, evidence, and dependency diagnostics.</p>
+            <div className="inline-flex rounded-lg border border-slate-800 p-1" role="group" aria-label="Technical detail view">
+              {(["list", "graph"] as ViewMode[]).map((modeOption) => <button key={modeOption} type="button" aria-pressed={view === modeOption} onClick={() => { setView(modeOption); if (modeOption === "list") setSelectedActionId(null); }} className={`rounded-md px-3 py-1.5 text-xs font-medium ${view === modeOption ? "bg-blue-500 text-white" : "text-slate-500"}`}>{modeOption === "list" ? "Action details" : "Dependency graph"}</button>)}
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button type="button" onClick={resetDemoCase} className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-500 hover:text-amber-700">Reset demo case</button>
+          </div>
         {/* Approval Queue Panel */}
         <section className="mt-8 rounded-xl border border-orange-900/40 bg-orange-950/20 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-900/30 pb-3">
@@ -743,7 +565,6 @@ export default function CasePage() {
               </div>
             )}
         </section>
-      </div>
 
       {/* ── Content area: List View or Graph View ────────────────────────────── */}
       {view === "list"
@@ -770,17 +591,6 @@ export default function CasePage() {
                   a.status === "pending"
                 );
                 const isLiveResearch = action.id === "identify-reporting";
-                const liveResearchApproval = actionApprovals.find(
-                  (approval) =>
-                    approval.operationType === "lost_document_research" &&
-                    ["pending", "approved"].includes(approval.status),
-                );
-
-                const canExecute = !isBlocked &&
-                  !isLiveResearch &&
-                  action.status !== "completed" &&
-                  (!action.approvalRequired || activeApproved);
-
                 return (
                   <article
                     key={action.id}
@@ -822,30 +632,6 @@ export default function CasePage() {
 
                       {/* Action Controls */}
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        {/* Prepare & Request Approval Button */}
-                        {!isLiveResearch && action.executionMode !== "manual" && action.status !== "completed" && !activeApproved && (
-                          <button
-                            onClick={() => requestActionApproval(action)}
-                            disabled={submittingReq}
-                            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
-                          >
-                            Request permission
-                          </button>
-                        )}
-
-                        {/* Execute Button */}
-                        {canExecute && (
-                          <button
-                            onClick={() => executeAction(action)}
-                            disabled={executingActionId === action.id}
-                            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-                          >
-                            {executingActionId === action.id
-                              ? "Executing…"
-                              : "Complete via SIMULATED Mock Provider"}
-                          </button>
-                        )}
-
                         {action.status === "in_progress" && action.executionMode !== "automated" && (
                           <button
                             onClick={() => void transition(action, "completed")}
@@ -854,34 +640,6 @@ export default function CasePage() {
                             I completed this myself
                           </button>
                         )}
-
-                        {action.id === "identify-reporting" &&
-                          !isBlocked &&
-                          !liveResearchApproval && (
-                            <button
-                              onClick={() => requestTinyFishApproval(action)}
-                              disabled={submittingReq}
-                              className="rounded-md border border-cyan-400/50 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/40 disabled:opacity-50"
-                            >
-                              Request LIVE TinyFish approval
-                            </button>
-                          )}
-
-                        {action.id === "identify-reporting" &&
-                          actionApprovals.some((approval) =>
-                            approval.status === "approved" &&
-                            approval.operationType === "lost_document_research"
-                          ) && (
-                            <button
-                              onClick={() => executeTinyFishResearch(action)}
-                              disabled={executingActionId === action.id}
-                              className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:opacity-50"
-                            >
-                              {executingActionId === action.id
-                                ? "Running LIVE TinyFish…"
-                                : "Run LIVE TinyFish research"}
-                            </button>
-                          )}
 
                         {/* History Button */}
                         <button
@@ -1033,12 +791,14 @@ export default function CasePage() {
                   action={selectedAction}
                   caseItem={item}
                   onClose={() => setSelectedActionId(null)}
-                  onTransition={transition}
+                  onTransition={async (action, status) => { await transition(action, status); }}
                 />
               </div>
             )}
           </div>
         )}
+        </details>
+      </div>
 
       {/* Review & Decide Modal */}
       {reviewApproval && (

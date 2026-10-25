@@ -26,6 +26,7 @@ const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("return-to-agent") }).strict(),
   z.object({ action: z.literal("advance-ucc-guide") }).strict(),
   z.object({ action: z.literal("refresh-official-site") }).strict(),
+  z.object({ action: z.literal("advance-to-workflow-step") }).strict(),
   z.object({ action: z.literal("end") }).strict(),
   z.object({ action: z.literal("click"), x: z.number().finite(), y: z.number().finite() }).strict(),
   z.object({ action: z.literal("type"), text: z.string().max(300) }).strict(),
@@ -93,6 +94,7 @@ export async function POST(
     if (command.action === "return-to-agent") return NextResponse.json(await continueSharedBrowserWithAgent(id));
     if (command.action === "advance-ucc-guide") return NextResponse.json(await advanceSharedBrowserUccGuide(id));
     if (command.action === "refresh-official-site") return NextResponse.json(await refreshSharedBrowserOfficialSite(id));
+    if (command.action === "advance-to-workflow-step") return NextResponse.json(await refreshSharedBrowserOfficialSite(id, "agent"));
     if (command.action === "end") return NextResponse.json(await endSharedBrowserSession(id));
     const { action: type, ...args } = command;
     const startedAt = performance.now();

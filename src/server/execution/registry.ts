@@ -10,7 +10,11 @@ class ExecutionProviderRegistry {
     const mock = new MockExecutionProvider();
     this.register(mock);
     this.register(new TinyFishExecutionProvider());
-    this.defaultProviderName = mock.name;
+    // Real execution is the default in the app. Mock execution remains
+    // registered for explicit test use, never as a silent production fallback.
+    this.defaultProviderName = process.env.NODE_ENV === "test"
+      ? mock.name
+      : "tinyfish";
   }
 
   register(provider: ExecutionProvider): void {

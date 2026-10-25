@@ -1,5 +1,5 @@
 import type { Action, ProposedOperation } from "../domain/types";
-import { createResearchBrief } from "./privacyBoundary";
+import { createResearchBrief, isReadOnlyResearchStep } from "./privacyBoundary";
 
 export class OperationFactoryError extends Error {
   statusCode = 400;
@@ -40,6 +40,42 @@ export function buildOperationForAction(
         ? `Find official reporting guidance for a lost ${research.documentType} in ${research.jurisdiction}.`
         : `Find official replacement requirements for a ${research.documentType} in ${research.jurisdiction}.`,
       payload: { ...research, researchTask: action.id },
+    };
+  }
+
+  // This exact workflow action researches public post-purchase document rules.
+  // The word "purchase" in its topic must not route it through the generic
+  // consequential-action filter; no property purchase or legal filing occurs.
+  if (action.id === "research-property-document-guidance") {
+    const jurisdiction = typeof context.jurisdiction === "string" ? context.jurisdiction : "";
+    const research = createResearchBrief(jurisdiction, "property purchase document requirements and registration records");
+    if (!research) {
+      throw new OperationFactoryError("Confirm the property's country and state, province, or city before researching local property-document requirements.");
+    }
+    return {
+      operationType: "public_life_event_research",
+      description: `Research official public property-document guidance for ${research.jurisdiction}. This is read-only research; it does not purchase property, file documents, or change ownership records.`,
+      payload: {
+        jurisdiction: research.jurisdiction,
+        researchTask: "life-event-guidance",
+        topic: research.documentType,
+      },
+    };
+  }
+
+  if (action.executionMode === "assisted" && isReadOnlyResearchStep(action.title, action.description)) {
+    const jurisdiction = typeof context.jurisdiction === "string" ? context.jurisdiction : "";
+    const topic = `${action.title}: ${action.description}`.slice(0, 100);
+    const research = createResearchBrief(jurisdiction, topic);
+    if (!research) {
+      throw new OperationFactoryError(
+        "Choose a general jurisdiction and keep the research step free of personal identifiers.",
+      );
+    }
+    return {
+      operationType: "public_life_event_research",
+      description: `Research official public guidance for: ${action.title}`,
+      payload: { jurisdiction: research.jurisdiction, researchTask: "life-event-guidance", topic: research.documentType },
     };
   }
 

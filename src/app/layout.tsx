@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TRESTLE — The Life-Event Compiler",
+  title: "TRESTLE — A clear next step",
   description:
-    "Turning complex life events into clear, dependency-aware workflows.",
+    "A steady hand for life’s paperwork, official guidance, and decisions that need you.",
 };
 
 export default function RootLayout(

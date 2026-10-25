@@ -1,16 +1,98 @@
 @import "tailwindcss";
 
 :root {
-  background: #07111f;
-  color: #e2e8f0;
+  color-scheme: light;
+  background: #f6f5f0;
+  color: #253536;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  background: #07111f;
+  background: #f6f5f0;
+  color: #253536;
   font-family: Arial, Helvetica, sans-serif;
+}
+
+button, input, textarea, select { font: inherit; }
+button, a, summary { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid #85bdb2;
+  outline-offset: 2px;
+}
+
+.trestle-home { background: #f6f5f0; }
+
+/* The legacy workflow and browser components retain their Tailwind structure,
+   while the case workspace presents them in the same warm, light product UI. */
+.trestle-case-page { background: #f6f5f0; color: #253536; }
+.trestle-case-page [class*="bg-slate-950"] { background-color: #fffefa !important; }
+.trestle-case-page [class*="bg-slate-900"] { background-color: #fbfaf6 !important; }
+.trestle-case-page [class*="bg-slate-800"] { background-color: #eeefea !important; }
+.trestle-case-page [class*="border-slate-"] { border-color: #e0e3dc !important; }
+.trestle-case-page [class*="text-slate-100"],
+.trestle-case-page [class*="text-slate-200"] { color: #28393a !important; }
+.trestle-case-page [class*="text-slate-300"] { color: #536360 !important; }
+.trestle-case-page [class*="text-slate-400"] { color: #6e7b76 !important; }
+.trestle-case-page [class*="text-slate-500"],
+.trestle-case-page [class*="text-slate-600"] { color: #87918b !important; }
+
+.trestle-case-page [class*="border-cyan-"] { border-color: #a9d2c7 !important; }
+.trestle-case-page [class*="bg-cyan-950"] { background-color: #edf7f2 !important; }
+.trestle-case-page [class*="text-cyan-100"],
+.trestle-case-page [class*="text-cyan-200"],
+.trestle-case-page [class*="text-cyan-300"] { color: #176b66 !important; }
+.trestle-case-page [class*="border-blue-"] { border-color: #b8cfdb !important; }
+.trestle-case-page [class*="text-blue-300"] { color: #3b718c !important; }
+.trestle-case-page [class*="bg-blue-500"] { background-color: #176b66 !important; }
+.trestle-case-page [class*="bg-cyan-600"] { background-color: #176b66 !important; }
+.trestle-case-page [class*="hover:bg-cyan-500"]:hover { background-color: #105a56 !important; }
+
+.trestle-case-page [class*="bg-amber-950"] { background-color: #fff6e5 !important; }
+.trestle-case-page [class*="border-amber-"] { border-color: #e7c88e !important; }
+.trestle-case-page [class*="text-amber-100"],
+.trestle-case-page [class*="text-amber-200"],
+.trestle-case-page [class*="text-amber-300"] { color: #78551b !important; }
+.trestle-case-page [class*="bg-orange-950"] { background-color: #fff2e8 !important; }
+.trestle-case-page [class*="border-orange-"] { border-color: #ebc8aa !important; }
+.trestle-case-page [class*="text-orange-100"],
+.trestle-case-page [class*="text-orange-200"],
+.trestle-case-page [class*="text-orange-300"] { color: #8a4b1e !important; }
+.trestle-case-page [class*="bg-rose-950"] { background-color: #fff1ed !important; }
+.trestle-case-page [class*="border-rose-"] { border-color: #e9c2b9 !important; }
+.trestle-case-page [class*="text-rose-200"],
+.trestle-case-page [class*="text-rose-300"] { color: #9c4938 !important; }
+.trestle-case-page [class*="bg-violet-950"] { background-color: #f4f1fa !important; }
+.trestle-case-page [class*="border-violet-"] { border-color: #d8cde9 !important; }
+.trestle-case-page [class*="text-violet-100"],
+.trestle-case-page [class*="text-violet-200"],
+.trestle-case-page [class*="text-violet-300"] { color: #654d83 !important; }
+
+.trestle-case-page input:not([type="radio"]):not([type="checkbox"]),
+.trestle-case-page textarea,
+.trestle-case-page select {
+  border-color: #d7ddd6;
+  background-color: #fffefa;
+  color: #28393a;
+}
+.trestle-case-page input::placeholder,
+.trestle-case-page textarea::placeholder { color: #9aa49e; }
+.trestle-case-page summary { color: #435552; }
+
+.trestle-case-page .workflow-stepper { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 0; }
+.trestle-case-page .workflow-stepper-item { position: relative; min-height: 64px; border: 0 !important; border-top: 1px solid #e4e7e1 !important; border-radius: 0 !important; background: transparent !important; padding: 12px 10px 10px 0; }
+.trestle-case-page .workflow-stepper-item[data-current="true"] { border-top: 2px solid #287d76 !important; }
+.trestle-case-page .workflow-stepper-item[data-state="completed"] { color: #287d76; }
+
+.trestle-case-page .technical-details > summary { list-style: none; }
+.trestle-case-page .technical-details > summary::-webkit-details-marker { display: none; }
+.trestle-case-page .technical-details[open] > summary { padding-bottom: .75rem; border-bottom: 1px solid #e3e7e1; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }

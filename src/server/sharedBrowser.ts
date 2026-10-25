@@ -46,6 +46,7 @@ export type SharedBrowserSnapshot = {
   selectionSource?: string | null;
   selectionReason?: string | null;
   isTestMode?: boolean;
+  accessIssue?: "blocked" | "challenge" | null;
 };
 
 function apiKey(): string {
@@ -304,20 +305,27 @@ class TinyFishCdp {
     return () => this.frameListeners.delete(listener);
   }
 
-  async metadata(): Promise<{ currentUrl: string | null; pageTitle: string }> {
+  async metadata(): Promise<{ currentUrl: string | null; pageTitle: string; accessIssue: "blocked" | "challenge" | null }> {
     const response = await this.send("Runtime.evaluate", {
-      expression: "JSON.stringify({url: location.href, title: document.title})",
+      expression: `JSON.stringify((() => {
+        const title = document.title || "";
+        const text = (document.body?.innerText || "").slice(0, 5000);
+        const blocked = /you have been blocked|access denied|request blocked|err_blocked_by_client/i.test(title + " " + text);
+        const challenge = /attention required|checking your browser|verify you are human|cloudflare ray id|captcha/i.test(title + " " + text);
+        return { url: location.href, title, accessIssue: blocked ? "blocked" : challenge ? "challenge" : null };
+      })())`,
       returnByValue: true,
     });
     const result = response.result as { value?: unknown } | undefined;
     try {
-      const value = JSON.parse(String(result?.value ?? "{}")) as { url?: string; title?: string };
+      const value = JSON.parse(String(result?.value ?? "{}")) as { url?: string; title?: string; accessIssue?: "blocked" | "challenge" | null };
       return {
         currentUrl: value.url ? safeDisplayUrl(value.url) : null,
         pageTitle: safeTitle(value.title ?? ""),
+        accessIssue: value.accessIssue === "blocked" || value.accessIssue === "challenge" ? value.accessIssue : null,
       };
     } catch {
-      return { currentUrl: null, pageTitle: "" };
+      return { currentUrl: null, pageTitle: "", accessIssue: null };
     }
   }
 
@@ -655,7 +663,7 @@ export async function getSharedBrowserSnapshot(caseId: string): Promise<SharedBr
         pageTitle: metadata.pageTitle,
       },
     }) as BrowserSessionRecord;
-    return { ...publicState(updated), screenshot: null, viewport: cdp.viewportSize() };
+    return { ...publicState(updated), screenshot: null, viewport: cdp.viewportSize(), accessIssue: metadata.accessIssue };
   } catch {
     connectionCache.get(row.id)?.close();
     connectionCache.delete(row.id);
@@ -742,15 +750,18 @@ export async function runSharedBrowserUserCommand(
 
 /** Refresh a bank/site selection after official domains or support URLs change,
  * keeping the same remote browser session and its user-control state. */
-export async function refreshSharedBrowserOfficialSite(caseId: string): Promise<SharedBrowserSnapshot> {
+export async function refreshSharedBrowserOfficialSite(
+  caseId: string,
+  expectedOwner: "user" | "agent" = "user",
+): Promise<SharedBrowserSnapshot> {
   const row = await prisma.sharedBrowserSession.findFirst({ where: { caseId, activeLock: caseId, status: "active" } }) as BrowserSessionRecord | null;
   if (!row) throw new Error("There is no active shared browser session.");
   if (row.isTestMode || row.selectionSource === "development_custom_url") {
     throw new Error("Refresh the official case destination only from a case browser session.");
   }
-  if (row.controlOwner !== "user") throw new Error("Take control of the browser before refreshing its official destination.");
+  if (row.controlOwner !== expectedOwner) throw new Error("Browser control changed; the official destination was not refreshed.");
   const claimed = await prisma.sharedBrowserSession.updateMany({
-    where: { id: row.id, status: "active", controlOwner: "user", commandClaimed: false },
+    where: { id: row.id, status: "active", controlOwner: expectedOwner, commandClaimed: false },
     data: { commandClaimed: true },
   });
   if (claimed.count !== 1) throw new Error("The browser is busy or control changed. Wait briefly and try again.");

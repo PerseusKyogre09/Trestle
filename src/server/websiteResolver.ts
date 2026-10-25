@@ -72,6 +72,33 @@ function matchingIssuer(text: string): (typeof issuerDirectory)[number] | null |
   return matches[0] ?? null;
 }
 
+function officialPageRelevance(url: string, action: Action, researchAction: Action): number {
+  const parsed = isSafePublicHttps(url);
+  if (!parsed) return Number.NEGATIVE_INFINITY;
+  let pathname = parsed.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // Malformed escapes do not make a verified URL unsafe; score its raw path.
+  }
+  const page = `${parsed.hostname} ${pathname}`.toLowerCase();
+  const context = `${action.title} ${action.description}`.toLowerCase();
+  const researchContext = `${researchAction.title} ${researchAction.description}`.toLowerCase();
+  const stopWords = new Set(["this", "that", "with", "from", "your", "their", "about", "official", "public", "guidance", "requirements", "records", "following", "relevant", "current", "step", "review", "prepare", "find", "research", "and", "the", "for"]);
+  const terms = [...new Set(context.match(/[a-z]{4,}/g) ?? [])].filter((term) => !stopWords.has(term));
+  const matches = terms.filter((term) => page.includes(term));
+  // A URL must have at least one page/path term tied to the active step.
+  // A source from an unrelated ancestor research action is not enough.
+  if (matches.length === 0) return Number.NEGATIVE_INFINITY;
+  const researchTerms = [...new Set(researchContext.match(/[a-z]{4,}/g) ?? [])].filter((term) => !stopWords.has(term));
+  let score = matches.reduce((total, term) => total + (parsed.pathname.toLowerCase().includes(term) ? 3 : 1), 0);
+  score += researchTerms.filter((term) => page.includes(term)).length * 0.25;
+  const pathSegments = parsed.pathname.split("/").filter(Boolean);
+  score += Math.min(pathSegments.length, 5) * 0.2;
+  if (pathSegments.length === 0) score -= 2;
+  return score;
+}
+
 function persistedOfficialSource(actions: Action[], action: Action): { url: string; domain: string } | null {
   const byId = new Map(actions.map((item) => [item.id, item]));
   const ancestors = new Set<string>();
@@ -91,7 +118,11 @@ function persistedOfficialSource(actions: Action[], action: Action): { url: stri
       try {
         const details = JSON.parse(attempt.resultDetails) as { officialSourceUrls?: unknown };
         const urls = Array.isArray(details.officialSourceUrls) ? details.officialSourceUrls : [];
-        const safe = urls.find((value): value is string => typeof value === "string" && isSafePublicHttps(value) !== null);
+        const safe = urls
+          .filter((value): value is string => typeof value === "string" && isSafePublicHttps(value) !== null)
+          .map((url) => ({ url, relevance: officialPageRelevance(url, action, candidate) }))
+          .filter((item) => Number.isFinite(item.relevance))
+          .sort((left, right) => right.relevance - left.relevance)[0]?.url;
         if (safe) {
           const parsed = isSafePublicHttps(safe)!;
           return { url: safe, domain: parsed.hostname.toLowerCase() };

@@ -23,9 +23,11 @@ type Session = {
   selectionSource?: string | null;
   selectionReason?: string | null;
   isTestMode?: boolean;
+  accessIssue?: "blocked" | "challenge" | null;
 };
 
-type Props = { caseId: string; actions: Action[]; isSpamReporting?: boolean; workflowStarted?: boolean };
+export type LiveBrowserFrame = { data: string; currentUrl: string | null; pageTitle: string | null; actionId: string | null };
+type Props = { caseId: string; actions: Action[]; isSpamReporting?: boolean; workflowStarted?: boolean; workflowActionId?: string | null; autoStartForWorkflow?: boolean; onLiveFrame?: (frame: LiveBrowserFrame | null) => void };
 
 function isTraiUccLandingPage(raw: string | null): boolean {
   if (!raw) return false;
@@ -37,7 +39,7 @@ function isTraiUccLandingPage(raw: string | null): boolean {
   }
 }
 
-export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = false, workflowStarted = false }: Props) {
+export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = false, workflowStarted = false, workflowActionId = null, autoStartForWorkflow = false, onLiveFrame }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,9 +58,12 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
   const queuedCommandCount = useRef(0);
   const lastWheelAt = useRef(0);
   const lastFrameMetricAt = useRef(0);
+  const lastGuideFrameAt = useRef(0);
   const pendingText = useRef("");
   const textTimer = useRef<number | undefined>(undefined);
   const automaticStartKey = useRef<string | null>(null);
+  const automaticWorkflowStartKey = useRef<string | null>(null);
+  const automaticStepNavigationKey = useRef<string | null>(null);
   const automaticUccAdvanceKey = useRef<string | null>(null);
   const sessionRevision = useRef(0);
   const pendingMutations = useRef(0);
@@ -69,6 +74,8 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
     : routeEvidence.toLowerCase().includes("suspected cybercrime")
     ? "suspected-cybercrime"
     : "";
+  const isTravelCase = actions.some((action) => action.id === "research-travel-entry-guidance");
+  const isBankCase = actions.some((action) => /\b(?:bank|credit card|debit card|card issuer)\b/i.test(`${action.title} ${action.description}`));
 
   useEffect(() => {
     let disposed = false;
@@ -140,6 +147,70 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
   }, [caseId, chosenRoute, isSpamReporting, session, sessionLoaded, workflowStarted]);
 
   useEffect(() => {
+    if (isSpamReporting || !autoStartForWorkflow || !workflowStarted || !sessionLoaded ||
+      (session && !["failed", "expired", "closed"].includes(session.status))) return;
+    const startKey = `${caseId}:verified-workflow-source`;
+    if (automaticWorkflowStartKey.current === startKey) return;
+    automaticWorkflowStartKey.current = startKey;
+    sessionRevision.current += 1;
+    pendingMutations.current += 1;
+    setBusy(true);
+    setError("");
+    void (async () => {
+      try {
+        const response = await fetch(`/api/cases/${caseId}/shared-browser`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "start" }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not open the researched official page.");
+        sessionRevision.current += 1;
+        setSession(data as Session);
+        if (data.currentUrl) setUrlDraft(data.currentUrl);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not open the researched official page.");
+      } finally {
+        pendingMutations.current -= 1;
+        setBusy(false);
+      }
+    })();
+  }, [autoStartForWorkflow, caseId, isSpamReporting, session, sessionLoaded, workflowStarted]);
+
+  useEffect(() => {
+    if (
+      isSpamReporting || !autoStartForWorkflow || !workflowStarted || !sessionLoaded ||
+      !workflowActionId || session?.status !== "active" || session.controlOwner !== "agent" ||
+      session.actionId === workflowActionId
+    ) return;
+    const navigationKey = `${caseId}:${session.sessionId}:${workflowActionId}`;
+    if (automaticStepNavigationKey.current === navigationKey) return;
+    automaticStepNavigationKey.current = navigationKey;
+    pendingMutations.current += 1;
+    setBusy(true);
+    setError("");
+    void (async () => {
+      try {
+        const response = await fetch(`/api/cases/${caseId}/shared-browser`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "advance-to-workflow-step" }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "No verified official page is available for this step yet.");
+        sessionRevision.current += 1;
+        setSession(data as Session);
+        if (data.currentUrl) setUrlDraft(data.currentUrl);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not open a verified page for this step.");
+      } finally {
+        pendingMutations.current -= 1;
+        setBusy(false);
+      }
+    })();
+  }, [autoStartForWorkflow, caseId, isSpamReporting, session, sessionLoaded, workflowActionId, workflowStarted]);
+
+  useEffect(() => {
     if (
       !isSpamReporting || chosenRoute !== "ordinary-ucc" || session?.status !== "active" ||
       session.controlOwner !== "agent" || session.selectionSource !== "official_reporting_directory" ||
@@ -157,6 +228,15 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
     const onFrame = (event: Event) => {
       const frame = JSON.parse((event as MessageEvent<string>).data) as { data: string; width: number; height: number; sentAt: number };
       setStreamedFrame(frame.data);
+      if (onLiveFrame && Date.now() - lastGuideFrameAt.current >= 2500) {
+        lastGuideFrameAt.current = Date.now();
+        onLiveFrame({
+          data: frame.data,
+          currentUrl: session.currentUrl,
+          pageTitle: session.pageTitle,
+          actionId: session.actionId ?? null,
+        });
+      }
       setStreamState("connected");
       if (Date.now() - lastFrameMetricAt.current >= 1000) {
         lastFrameMetricAt.current = Date.now();
@@ -170,7 +250,11 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
       source.removeEventListener("frame", onFrame);
       source.close();
     };
-  }, [caseId, session?.status, session?.sessionId]);
+  }, [caseId, onLiveFrame, session?.actionId, session?.currentUrl, session?.pageTitle, session?.status, session?.sessionId]);
+
+  useEffect(() => {
+    if (session?.status !== "active") onLiveFrame?.(null);
+  }, [onLiveFrame, session?.status]);
 
   function command(body: Record<string, unknown>) {
     if (body.action !== "type" && pendingText.current) flushText();
@@ -256,12 +340,12 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
   }
 
   return (
-    <section className="mt-5 rounded-xl border border-cyan-800/70 bg-slate-950/70 p-4" aria-label="Case-aware shared TinyFish browser">
+    <section className="trestle-browser-panel mt-5 rounded-xl border border-cyan-800/70 bg-slate-950/70 p-4 sm:p-5" aria-label="Case-aware shared TinyFish browser">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">{isSpamReporting ? "TinyFish-hosted browser · TRESTLE controls" : "Case-aware shared browser"}</p>
-          <h3 className="mt-1 text-base font-semibold text-slate-100">{isSpamReporting ? "TRESTLE opens the selected official destination" : "Open the verified site for this workflow step"}</h3>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-400">{isSpamReporting ? "After you choose UCC spam or suspected cybercrime, TRESTLE automatically opens that official route in the shared TinyFish browser. Take control when the site needs your details; return control and TRESTLE checks the page structure. For ordinary UCC, TRAI is guidance and complaints go through your telecom provider. TRESTLE does not read entered values or submit reports." : "TRESTLE opens a persisted official research source or a verified public institution support page. You control the shared page. Account access and consequential actions stay with you; loading a page never means the task was completed."}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">{isSpamReporting ? "Live browser · TinyFish" : "Shared live browser"}</p>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-100">{isSpamReporting ? "The official site for your selected route" : "The website for this step"}</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">{isSpamReporting ? "Once you choose ordinary spam or suspected cybercrime, TRESTLE opens the matching official route in this shared browser. Take control when the site needs your input; return control for permitted page checks. Ordinary UCC complaints go through your telecom provider. TRESTLE does not read form values or submit reports." : "When TinyFish finds a verified official source for the current step, TRESTLE opens it in the shared browser. The dashboard shows genuine live page frames; opening a page does not complete the task."}</p>
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-bold uppercase ${session?.controlOwner === "user" ? "border-amber-700 bg-amber-950/40 text-amber-200" : session?.controlOwner === "agent" ? "border-cyan-700 bg-cyan-950/40 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-300"}`}>
           {session?.status === "active" ? `${session.controlOwner === "agent" && session.selectionSource === "official_reporting_directory" ? "TRESTLE" : session.controlOwner} has control` : session?.status ?? "not started"}
@@ -270,19 +354,20 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
 
       {!session || ["failed", "expired", "closed"].includes(session.status)
         ? <div className="mt-4 space-y-3">
-          {!isSpamReporting && <label className="block max-w-lg text-xs text-slate-300" htmlFor={`browser-institution-${caseId}`}>Institution or bank, if relevant <span className="text-slate-500">(name only; no account/card details)</span>
-            <input id={`browser-institution-${caseId}`} value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder="For example, ICICI Bank" className="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100" />
+          {!isSpamReporting && !isTravelCase && <label className="block max-w-lg text-xs text-slate-300" htmlFor={`browser-institution-${caseId}`}>{isBankCase ? "Card-issuing bank, if it is not clear from your case" : "Organization or agency, if relevant"} <span className="text-slate-500">(name only)</span>
+            <input id={`browser-institution-${caseId}`} value={institution} onChange={(event) => setInstitution(event.target.value)} placeholder={isBankCase ? "For example, ICICI Bank" : "For example, the relevant agency"} className="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100" />
           </label>}
           <div className="flex flex-wrap gap-2">
-            {!isSpamReporting && <button type="button" disabled={busy} onClick={() => void command({ action: "start", institution })} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Opening verified case website…" : session?.status === "expired" ? "Open case website in a new session" : "Open case website"}</button>}
+            {!isSpamReporting && !workflowStarted && <button type="button" disabled={busy} onClick={() => void command({ action: "start", institution })} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Opening verified case website…" : session?.status === "expired" ? "Open case website in a new session" : "Open case website"}</button>}
             {isSpamReporting && !workflowStarted && <p className="text-sm text-slate-400">Start the workflow and select the reporting category; the matching official page will open automatically.</p>}
             {isSpamReporting && workflowStarted && !chosenRoute && <p className="text-sm text-slate-400">Waiting for your reporting-route choice before opening a site.</p>}
             {isSpamReporting && workflowStarted && chosenRoute && <p role="status" className="text-sm text-cyan-200">{busy ? "Opening your selected route in the live TinyFish browser…" : error ? "Automatic browser start needs attention; use the error above." : session && ["failed", "expired", "closed"].includes(session.status) ? `The previous browser session is ${session.status}. Open a new session to continue.` : "Opening the selected official page automatically when no session is already active."}</p>}
+            {!isSpamReporting && workflowStarted && !autoStartForWorkflow && <p role="status" className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm leading-6 text-teal-900">You already started this step with <strong>Start my case</strong>. TinyFish is researching the official source now; you don’t need to click anything here. The shared browser will open automatically after the real research run records a verified official URL. TRESTLE will not guess a destination.</p>}
             {isSpamReporting && chosenRoute && error && <button type="button" disabled={busy} onClick={() => void command({ action: "start" })} className="rounded-lg border border-amber-700 px-3 py-2 text-sm text-amber-100 disabled:opacity-50">Retry opening selected official page</button>}
             {isSpamReporting && workflowStarted && chosenRoute && session && ["failed", "expired", "closed"].includes(session.status) && <button type="button" disabled={busy} onClick={() => void command({ action: "start" })} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Opening…" : "Open official page in a new browser session"}</button>}
-            {!isSpamReporting && <button type="button" disabled={busy} onClick={() => void command({ action: "start", testMode: true })} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 disabled:opacity-50">Development test site</button>}
+            {!isSpamReporting && !workflowStarted && <button type="button" disabled={busy} onClick={() => void command({ action: "start", testMode: true })} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400 disabled:opacity-50">Development test site</button>}
           </div>
-          {!isSpamReporting && <p className="text-xs text-slate-500">The development test site works only when the server has TRESTLE_BROWSER_TEST_MODE=true. It is never selected for a case.</p>}
+          {!isSpamReporting && !workflowStarted && <p className="text-xs text-slate-500">The development test site works only when the server has TRESTLE_BROWSER_TEST_MODE=true. It is never selected for a case.</p>}
         </div>
         : session.status === "disconnected"
         ? <button type="button" disabled={busy} onClick={() => void command({ action: "start" })} className="mt-4 rounded-lg border border-amber-700 px-4 py-2 text-sm text-amber-100 disabled:opacity-50">{busy ? "Reconnecting…" : "Reconnect to this session"}</button>
@@ -297,6 +382,14 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
               <p className="mt-1 text-xs text-slate-400">Selection: {session.selectionSource ?? "unknown"}. {session.selectionReason ?? "No selection explanation is available."}</p>
               {session.selectedUrl && <a href={session.selectedUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold text-cyan-300 underline underline-offset-2">Open selected page in my browser</a>}
             </div>
+            {session.accessIssue && (
+              <div role="alert" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+                <h4 className="font-semibold">{session.accessIssue === "blocked" ? "The official site blocked the remote browser" : "The official site requires a browser check"}</h4>
+                <p className="mt-1 leading-6">TinyFish detected an access block or security challenge on this page. TRESTLE will not bypass it. Open the verified official page in your own browser and follow the site’s instructions there. This remote page has not been treated as a successful visit or completed workflow step.</p>
+                {(session.selectedUrl ?? session.currentUrl) && <a href={session.selectedUrl ?? session.currentUrl ?? undefined} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex rounded-lg bg-amber-900 px-3 py-2 font-semibold text-white">Open official site in my browser</a>}
+                <p className="mt-2 text-xs">When you finish, return to TRESTLE and record what you were able to do. Any completion will be saved as user-reported unless TRESTLE can independently verify it.</p>
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <p className="mr-auto min-w-0 text-xs text-slate-400">{session.pageTitle || "Page title unavailable"} · <span className="break-all">{session.currentUrl || "URL unavailable"}</span></p>
               {session.controlOwner === "agent"
@@ -383,6 +476,7 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
                 : "The page is not currently under your control. The browser view is real; no automated action is claimed for this case step."}
             </p>
             <p className="mt-1 text-[11px] text-cyan-300">Live CDP frame stream: {session.status === "active" ? streamState : "disconnected"}</p>
+            <p className="mt-1 text-[11px] text-slate-500">The image above is captured from this real TinyFish browser session and updates as the page changes; it is not a sample screenshot.</p>
             {session.lastActivity && (
               <p className="mt-1 text-[11px] text-slate-600">
                 Last browser activity: {new Date(session.lastActivity).toLocaleTimeString()}
@@ -398,7 +492,7 @@ export default function SharedBrowserPanel({ caseId, actions, isSpamReporting = 
           </>
         )}
       {error && <p role="alert" className="mt-3 rounded-lg border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">{error}</p>}
-      <p className="mt-3 text-[11px] leading-5 text-slate-600">This uses a billable TinyFish Browser API session. The CDP URL and API key remain server-side. Local-development-only: TRESTLE has no user authentication. Research and page navigation do not block cards, submit forms, or verify account changes.</p>
+      <p className="mt-3 text-[11px] leading-5 text-slate-600">Never enter passwords, card security codes, or OTPs in TRESTLE. In this local development app, browser access is not tied to a user account; keep the session on a trusted machine.</p>
     </section>
   );
 }
